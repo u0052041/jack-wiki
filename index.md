@@ -21,8 +21,9 @@ permalink: /
 | 主題 | 說明 |
 |:-----|:-----|
 | [Struct & Pointer 基礎指南](struct-and-pointer.html) | 結構體、指標、值傳遞 vs 引用 |
+| [String & Rune 字串處理](string-and-rune.html) | byte vs rune、中文處理陷阱 |
 | [Slice & Array 終極實戰指南](array-and-slice.html) | Python 對照、複製流派、常見陷阱 |
-| [Map 深度攻略](map.html) | 併發安全、GC 優化、常見操作 |
+| [Map 深度攻略](map.html) | Set 實作、併發安全、GC 優化 |
 
 ### 進階篇
 
