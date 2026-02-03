@@ -290,7 +290,117 @@ close(done)  // 發送完成信號
 
 ---
 
-## 五、Struct Tags
+## 五、常數與 iota (枚舉必學)
+
+### 常數定義
+
+```go
+// 單一常數
+const Pi = 3.14159
+const MaxSize int = 100
+
+// 常數組
+const (
+    StatusPending  = 0
+    StatusActive   = 1
+    StatusInactive = 2
+)
+```
+
+### iota：自動遞增的魔法
+
+```go
+const (
+    Sunday = iota  // 0
+    Monday         // 1
+    Tuesday        // 2
+    Wednesday      // 3
+    Thursday       // 4
+    Friday         // 5
+    Saturday       // 6
+)
+```
+
+> **重點**：`iota` 在每個 `const` 區塊重置為 0，每行自動 +1。
+{: .note }
+
+### iota 實用技巧
+
+```go
+// 跳過某些值
+const (
+    _ = iota  // 0 (跳過)
+    KB = 1 << (10 * iota)  // 1 << 10 = 1024
+    MB                      // 1 << 20
+    GB                      // 1 << 30
+    TB                      // 1 << 40
+)
+
+// 位元遮罩 (Bitmask)
+const (
+    FlagRead  = 1 << iota  // 1
+    FlagWrite              // 2
+    FlagExec               // 4
+)
+// 組合使用：FlagRead | FlagWrite = 3
+
+// 從 1 開始
+const (
+    First = iota + 1  // 1
+    Second            // 2
+    Third             // 3
+)
+```
+
+### 用 iota 實作枚舉
+
+```go
+type Status int
+
+const (
+    StatusPending Status = iota
+    StatusApproved
+    StatusRejected
+)
+
+// 加上 String() 方法讓印出更友善
+func (s Status) String() string {
+    return [...]string{"Pending", "Approved", "Rejected"}[s]
+}
+
+fmt.Println(StatusApproved)  // Approved (而不是 1)
+```
+
+### iota 陷阱
+
+```go
+// 陷阱 1：同一行的 iota 值相同
+const (
+    A, B = iota, iota  // A=0, B=0
+    C, D               // C=1, D=1
+)
+
+// 陷阱 2：空行不影響 iota
+const (
+    X = iota  // 0
+
+    Y         // 1 (空行不影響)
+    Z         // 2
+)
+
+// 陷阱 3：重新賦值會中斷 iota
+const (
+    A = iota  // 0
+    B         // 1
+    C = 100   // 100 (手動賦值)
+    D         // 100 (繼承上一行的值！)
+    E = iota  // 4 (恢復 iota，但已經是第 5 行)
+)
+```
+
+---
+
+## 六、Struct Tags
 
 ### JSON Tags
 
@@ -328,7 +438,7 @@ type Model struct {
 
 ---
 
-## 六、值傳遞 vs 引用語意
+## 七、值傳遞 vs 引用語意
 
 ### Go 只有值傳遞！
 
@@ -369,7 +479,7 @@ fmt.Println(nums)  // [999 2 3]
 
 ---
 
-## 七、常見面試題
+## 八、常見面試題
 
 ### Q1：new 和 make 的區別？
 - `new(T)` 回傳 `*T`，指向零值
