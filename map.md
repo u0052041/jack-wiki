@@ -403,7 +403,191 @@ type Bad struct {
 
 ---
 
-## 7. 實用範例
+## 7. 用 Map 實作 Set
+
+Go 沒有內建 Set 型別，但可以用 Map 輕鬆實作。
+
+### 基本概念
+
+```go
+// Set 只關心「有沒有」，不關心「值是什麼」
+// 所以用 map[T]struct{} 或 map[T]bool
+
+// 方式 1：map[T]struct{} (推薦，不佔額外記憶體)
+set := make(map[string]struct{})
+
+// 方式 2：map[T]bool (較直觀)
+set := make(map[string]bool)
+```
+
+### 為什麼用 struct{} 而不是 bool？
+
+```go
+// struct{} 是空結構，佔用 0 bytes
+var s struct{}
+fmt.Println(unsafe.Sizeof(s))  // 0
+
+// bool 佔用 1 byte
+var b bool
+fmt.Println(unsafe.Sizeof(b))  // 1
+```
+
+> **結論**：當 Set 元素很多時，`map[T]struct{}` 可以省下可觀的記憶體。
+{: .note }
+
+### Set 完整實作
+
+```go
+// StringSet 型別定義
+type StringSet map[string]struct{}
+
+// 建立 Set
+func NewStringSet(items ...string) StringSet {
+    s := make(StringSet)
+    for _, item := range items {
+        s[item] = struct{}{}
+    }
+    return s
+}
+
+// 新增元素
+func (s StringSet) Add(item string) {
+    s[item] = struct{}{}
+}
+
+// 移除元素
+func (s StringSet) Remove(item string) {
+    delete(s, item)
+}
+
+// 檢查是否存在
+func (s StringSet) Contains(item string) bool {
+    _, ok := s[item]
+    return ok
+}
+
+// 取得大小
+func (s StringSet) Size() int {
+    return len(s)
+}
+
+// 轉為 Slice
+func (s StringSet) ToSlice() []string {
+    result := make([]string, 0, len(s))
+    for item := range s {
+        result = append(result, item)
+    }
+    return result
+}
+```
+
+### Set 常見操作
+
+```go
+// 聯集 (Union)
+func (s StringSet) Union(other StringSet) StringSet {
+    result := NewStringSet()
+    for item := range s {
+        result.Add(item)
+    }
+    for item := range other {
+        result.Add(item)
+    }
+    return result
+}
+
+// 交集 (Intersection)
+func (s StringSet) Intersection(other StringSet) StringSet {
+    result := NewStringSet()
+    for item := range s {
+        if other.Contains(item) {
+            result.Add(item)
+        }
+    }
+    return result
+}
+
+// 差集 (Difference)
+func (s StringSet) Difference(other StringSet) StringSet {
+    result := NewStringSet()
+    for item := range s {
+        if !other.Contains(item) {
+            result.Add(item)
+        }
+    }
+    return result
+}
+```
+
+### 使用範例
+
+```go
+// 建立並操作 Set
+fruits := NewStringSet("apple", "banana", "orange")
+fruits.Add("grape")
+fruits.Remove("banana")
+
+fmt.Println(fruits.Contains("apple"))   // true
+fmt.Println(fruits.Contains("banana"))  // false
+fmt.Println(fruits.Size())              // 3
+
+// 集合運算
+set1 := NewStringSet("a", "b", "c")
+set2 := NewStringSet("b", "c", "d")
+
+union := set1.Union(set2)           // {a, b, c, d}
+intersection := set1.Intersection(set2)  // {b, c}
+diff := set1.Difference(set2)       // {a}
+```
+
+### 快速用法 (不需要完整 Set 型別)
+
+```go
+// 檢查重複
+func hasDuplicate(items []string) bool {
+    seen := make(map[string]struct{})
+    for _, item := range items {
+        if _, ok := seen[item]; ok {
+            return true  // 已存在
+        }
+        seen[item] = struct{}{}
+    }
+    return false
+}
+
+// 快速去重
+func unique(items []string) []string {
+    seen := make(map[string]struct{})
+    result := []string{}
+    for _, item := range items {
+        if _, ok := seen[item]; !ok {
+            seen[item] = struct{}{}
+            result = append(result, item)
+        }
+    }
+    return result
+}
+
+// 兩個 Slice 的交集
+func intersection(a, b []string) []string {
+    set := make(map[string]struct{})
+    for _, item := range a {
+        set[item] = struct{}{}
+    }
+
+    result := []string{}
+    for _, item := range b {
+        if _, ok := set[item]; ok {
+            result = append(result, item)
+        }
+    }
+    return result
+}
+```
+
+---
+
+## 8. 更多實用範例
 
 ### 統計字元出現次數
 
@@ -488,7 +672,7 @@ func mergeMaps(maps ...map[string]int) map[string]int {
 
 ---
 
-## 8. 效能優化建議
+## 9. 效能優化建議
 
 ### 預分配容量
 
@@ -540,7 +724,7 @@ clear(m)  // 清空但保留空間
 
 ---
 
-## 9. 常見面試題
+## 10. 常見面試題
 
 ### Q1：Map 的底層結構是什麼？
 - Map 底層是 **hash table**，由多個 **bucket** 組成
