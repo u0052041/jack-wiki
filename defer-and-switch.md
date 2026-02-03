@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Defer & Switch 語法範例全集
-nav_order: 4
+nav_order: 7
 ---
 
 # Go 進階筆記：Defer & Switch 語法範例全集

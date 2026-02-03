@@ -16,13 +16,21 @@ permalink: /
 
 ## 📚 筆記目錄
 
+### 基礎篇
+
 | 主題 | 說明 |
 |:-----|:-----|
-| [Slice & Array 終極實戰指南](array-and-slice.html) | Python 對照、複製流派、常見操作 |
-| [Map 深度攻略](map.html) | GC 優化、巢狀 vs Struct Key |
-| [Defer & Switch 語法範例全集](defer-and-switch.html) | 各種 Switch 變體、Defer 核心範例 |
-| [閉包核心與實戰](closure.html) | 狀態隔離、Middleware 工廠模式 |
+| [Struct & Pointer 基礎指南](struct-and-pointer.html) | 結構體、指標、值傳遞 vs 引用 |
+| [Slice & Array 終極實戰指南](array-and-slice.html) | Python 對照、複製流派、常見陷阱 |
+| [Map 深度攻略](map.html) | 併發安全、GC 優化、常見操作 |
+
+### 進階篇
+
+| 主題 | 說明 |
+|:-----|:-----|
 | [Methods & Interfaces](interface-and-method.html) | Value vs Pointer Receiver、Nil 陷阱 |
+| [閉包核心與實戰](closure.html) | 狀態隔離、迴圈陷阱、Middleware 模式 |
+| [Defer & Switch 語法全集](defer-and-switch.html) | 資源管理、型別切換、常見陷阱 |
 | [Error 錯誤處理完全指南](error.html) | Panic vs Error、錯誤鏈、業界最佳實踐 |
 
 ---

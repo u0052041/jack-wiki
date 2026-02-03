@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Error 錯誤處理完全指南
-nav_order: 7
+nav_order: 8
 ---
 
 # Go 進階筆記：Error 錯誤處理完全指南
