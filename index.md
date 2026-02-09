@@ -34,6 +34,7 @@ permalink: /
 | [Defer & Switch 語法全集](defer-and-switch.html) | 資源管理、型別切換、常見陷阱 |
 | [Error 錯誤處理完全指南](error.html) | Panic vs Error、錯誤鏈、業界最佳實踐 |
 | [Context 並發控制完全指南](context.html) | 取消信號、超時控制、跨層傳值 |
+| [Goroutine & Channel 並發全攻略](goroutine-and-channel.html) | GMP 排程、Channel 模式、sync 工具箱 |
 
 ---
 
