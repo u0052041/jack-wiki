@@ -36,6 +36,15 @@ permalink: /
 | [Context 並發控制完全指南](context.html) | 取消信號、超時控制、跨層傳值 |
 | [Goroutine & Channel 並發全攻略](goroutine-and-channel.html) | GMP 排程、Channel 模式、sync 工具箱 |
 
+### 系統設計篇
+
+| 主題 | 說明 |
+|:-----|:-----|
+| [分散式系統理論](distributed-system.html) | CAP、PACELC、分散式交易 (2PC/TCC/Saga) |
+| [資料庫底層原理](database-internal.html) | ACID、B+ Tree 索引、鎖機制、布隆過濾器 |
+| [Redis 底層原理](redis-internal.html) | 資料結構、持久化、Cluster、Pipeline、限流 |
+| [MySQL 線上不停機拆表](mysql-table-split.html) | Expand & Contract 六階段、雙寫、gh-ost |
+
 ---
 
 ## 🎯 適合對象
