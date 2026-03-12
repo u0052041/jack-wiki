@@ -1,4 +1,15 @@
+---
+layout: default
+title: 資料庫事故排查手冊
+parent: 系統設計
+nav_order: 5
+---
+
 # Database Incident Runbook
+{: .no_toc }
+
+1. TOC
+{:toc}
 
 DB 爆炸時的排查手冊，依症狀分類，快速定位問題並處理。
 
