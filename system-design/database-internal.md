@@ -109,7 +109,23 @@ UPDATE accounts SET balance = -50 WHERE user = 'A';
 
 #### MVCC — 多版本並發控制
 
-大多數資料庫用 MVCC 實現隔離性（而非單純加鎖），每筆資料保留多個版本：
+大多數資料庫用 MVCC 實現隔離性（而非單純加鎖），核心思想：**讀不阻塞寫，寫不阻塞讀**。每筆資料保留多個版本，讀取時根據快照決定看到哪個版本。
+
+##### 為什麼需要 MVCC？
+
+```
+【沒有 MVCC — 純粹用鎖】
+  TX A: SELECT balance FROM accounts WHERE id=1;  -- 加讀鎖
+  TX B: UPDATE accounts SET balance=50 WHERE id=1; -- 需要寫鎖 → 等待 TX A 釋放 ⏳
+  → 讀寫互相阻塞，併發效能差
+
+【有 MVCC】
+  TX A: SELECT balance → 讀 Version 1（不加鎖，讀歷史版本）
+  TX B: UPDATE balance → 直接寫入 Version 2（不需等待）
+  → 讀寫不互斥，併發效能大幅提升
+```
+
+##### 版本鏈與快照讀
 
 ```
 Row: user='A'
@@ -121,12 +137,84 @@ TX 16 (Read Committed)  → 讀 Version 2 (TX 15 已提交)
 TX 14 (Repeatable Read) → 始終讀 Version 1 (快照在 TX 14 開始時建立)
 ```
 
-| 隔離等級 | MVCC 行為 |
-|:-----|:-----|
-| **Read Committed** | 每次 SELECT 都取最新的已提交快照 |
-| **Repeatable Read** | 交易開始時建立快照，整個交易期間用同一快照 |
+| 隔離等級 | Read View 建立時機 | MVCC 行為 |
+|:-----|:-----|:-----|
+| **Read Committed** | 每次 SELECT 都建立新的 Read View | 每次讀都能看到最新已提交的資料 |
+| **Repeatable Read** | 交易中第一次 SELECT 時建立 | 整個交易期間用同一份快照，讀到的資料一致 |
 
-**InnoDB MVCC 實作細節**：
+##### SQL 範例：RC vs RR 在 MVCC 下的差異
+
+```sql
+-- 初始狀態: accounts 表中 id=1, balance=1000
+
+-- ===== Read Committed =====
+
+-- TX A (RC)                           -- TX B
+BEGIN;                                  BEGIN;
+SELECT balance FROM accounts
+WHERE id=1;
+→ 1000
+                                        UPDATE accounts SET balance=500 WHERE id=1;
+                                        COMMIT;
+SELECT balance FROM accounts
+WHERE id=1;
+→ 500  ← 看到 TX B 的更新
+       （因為 RC 每次 SELECT 都建新快照）
+COMMIT;
+
+-- ===== Repeatable Read =====
+
+-- TX A (RR)                           -- TX B
+BEGIN;                                  BEGIN;
+SELECT balance FROM accounts
+WHERE id=1;
+→ 1000  ← 此時建立快照
+                                        UPDATE accounts SET balance=500 WHERE id=1;
+                                        COMMIT;
+SELECT balance FROM accounts
+WHERE id=1;
+→ 1000  ← 仍然是 1000！
+       （因為 RR 用的還是同一份快照）
+COMMIT;
+```
+
+##### 快照讀 vs 當前讀
+
+MVCC 只作用於**快照讀**（普通 SELECT），**當前讀**會讀取最新版本並加鎖：
+
+```sql
+-- 快照讀（MVCC，不加鎖）
+SELECT * FROM accounts WHERE id = 1;
+
+-- 當前讀（讀最新版本 + 加鎖，繞過 MVCC）
+SELECT * FROM accounts WHERE id = 1 FOR UPDATE;       -- 排他鎖
+SELECT * FROM accounts WHERE id = 1 FOR SHARE;        -- 共享鎖
+UPDATE accounts SET balance = 500 WHERE id = 1;        -- 隱含當前讀
+DELETE FROM accounts WHERE id = 1;                     -- 隱含當前讀
+```
+
+```
+-- 這就是為什麼 RR 下 UPDATE 不會丟失更新
+
+-- TX A (RR)                           -- TX B (RR)
+BEGIN;                                  BEGIN;
+SELECT balance FROM accounts
+WHERE id=1;
+→ 1000（快照讀）
+                                        UPDATE accounts SET balance=500 WHERE id=1;
+                                        -- 當前讀 + 加行鎖
+                                        COMMIT;
+UPDATE accounts SET balance=balance-100
+WHERE id=1;
+-- 當前讀：讀到 balance=500（不是快照的 1000）
+-- 結果：balance=400 ✓（沒有丟失 TX B 的更新）
+COMMIT;
+```
+
+> **重點**：MVCC 只影響 SELECT（快照讀），所有 DML（INSERT/UPDATE/DELETE）和 `FOR UPDATE/FOR SHARE` 都是當前讀，會讀最新已提交版本並加鎖。這保證了即使在 RR 下，寫入操作也不會覆蓋別人的更新。
+{: .important }
+
+##### InnoDB MVCC 實作細節
 
 ```
 每一行隱藏欄位：
@@ -136,18 +224,52 @@ TX 14 (Repeatable Read) → 始終讀 Version 1 (快照在 TX 14 開始時建立
 │          │  交易 ID)    │  Log 的指標) │          │
 └──────────┴──────────────┴──────────────┴──────────┘
 
+版本鏈（透過 Undo Log 串接）：
+  ┌─────────────────────┐
+  │ balance=400         │ ← 最新版本 (DB_TRX_ID=20)
+  │ DB_ROLL_PTR ────────┼──→ ┌─────────────────────┐
+  └─────────────────────┘    │ balance=500         │ ← 舊版本 (DB_TRX_ID=15)
+                             │ DB_ROLL_PTR ────────┼──→ ┌─────────────────────┐
+                             └─────────────────────┘    │ balance=1000        │ ← 最舊版本 (DB_TRX_ID=10)
+                                                        │ DB_ROLL_PTR = NULL  │
+                                                        └─────────────────────┘
+
 Read View（快照）包含：
   - m_ids:      當前所有活躍（未提交）的交易 ID 列表
   - min_trx_id: m_ids 中最小的值
   - max_trx_id: 下一個將分配的交易 ID
   - creator_id: 建立此 Read View 的交易 ID
 
-可見性判斷：
+可見性判斷（沿版本鏈從新到舊逐一檢查）：
+  if (row.trx_id == creator_id) → 可見（自己修改的）
   if (row.trx_id < min_trx_id) → 可見（交易已提交）
   if (row.trx_id >= max_trx_id) → 不可見（交易在快照後才開始）
   if (row.trx_id in m_ids)     → 不可見（交易未提交）
   else                          → 可見（交易已提交）
+  → 不可見時，沿 DB_ROLL_PTR 找上一個版本，重複判斷
 ```
+
+##### PostgreSQL MVCC 的差異
+
+PostgreSQL 不使用 Undo Log，而是直接在表中保留舊版本：
+
+```
+InnoDB:  舊版本存在 Undo Log → 表中只有最新版本 → 表不膨脹
+         但 Undo Log 需要定期 purge
+
+PostgreSQL: 舊版本直接存在表中 → 表會膨脹 → 需要 VACUUM 回收
+            每行有 xmin (建立此版本的 TX ID) 和 xmax (刪除/更新此版本的 TX ID)
+
+┌────────┬───────┬───────┬─────────────┐
+│  xmin  │ xmax  │  id   │  balance    │
+├────────┼───────┼───────┼─────────────┤
+│  TX 10 │ TX 15 │   1   │  1000       │  ← 舊版本（被 TX 15 更新）
+│  TX 15 │   0   │   1   │   500       │  ← 新版本（active）
+└────────┴───────┴───────┴─────────────┘
+```
+
+> **重點**：PostgreSQL 因為舊版本存在表中，長時間跑的交易會阻止 VACUUM 回收舊版本，導致**表膨脹 (Table Bloat)**。這是 PG 環境中常見的效能問題，務必避免長交易。
+{: .note }
 
 ### Durability — 持久性
 
