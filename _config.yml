@@ -3,7 +3,7 @@ description: Backend Engineer - Golang & Python
 remote_theme: just-the-docs/just-the-docs
 
 url: https://u0052041.github.io
-baseurl: /golang-tour
+baseurl: /jack-wiki
 
 search_enabled: true
 footer_content: "Jack Ho - Backend Engineer"
