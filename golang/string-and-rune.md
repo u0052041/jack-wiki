@@ -1,7 +1,8 @@
 ---
 layout: default
 title: String & Rune 字串處理
-nav_order: 3
+parent: Golang 筆記
+nav_order: 2
 ---
 
 # Go 進階筆記：String & Rune 字串處理

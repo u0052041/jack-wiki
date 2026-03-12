@@ -1,7 +1,8 @@
 ---
 layout: default
 title: 資料庫底層原理
-nav_order: 13
+parent: 系統設計
+nav_order: 2
 ---
 
 # 資料庫底層原理：ACID、索引、鎖與資料結構

@@ -1,7 +1,8 @@
 ---
 layout: default
 title: Goroutine & Channel 並發全攻略
-nav_order: 11
+parent: Golang 筆記
+nav_order: 10
 ---
 
 # Go 進階筆記：Goroutine & Channel 並發全攻略

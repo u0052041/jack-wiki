@@ -1,7 +1,8 @@
 ---
 layout: default
 title: Methods & Interfaces
-nav_order: 6
+parent: Golang 筆記
+nav_order: 5
 ---
 
 # Go 進階筆記：Methods & Interfaces (物件與行為)

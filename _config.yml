@@ -1,10 +1,10 @@
-title: Golang 學習筆記
-description: 高品質 Golang 實戰教學筆記 (繁體中文)
+title: Jack Ho
+description: Backend Engineer - Golang & Python
 remote_theme: just-the-docs/just-the-docs
 
 url: https://u0052041.github.io
 baseurl: /golang-tour
 
 search_enabled: true
-footer_content: "Golang 學習筆記 - Jack Ho"
+footer_content: "Jack Ho - Backend Engineer"
 color_scheme: light

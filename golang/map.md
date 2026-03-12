@@ -1,7 +1,8 @@
 ---
 layout: default
 title: Map 深度攻略
-nav_order: 5
+parent: Golang 筆記
+nav_order: 4
 ---
 
 # Golang Map 深度攻略

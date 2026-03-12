@@ -1,7 +1,8 @@
 ---
 layout: default
 title: Struct & Pointer 基礎指南
-nav_order: 2
+parent: Golang 筆記
+nav_order: 1
 ---
 
 # Go 進階筆記：Struct & Pointer 基礎指南

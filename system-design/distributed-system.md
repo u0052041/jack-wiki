@@ -1,7 +1,8 @@
 ---
 layout: default
 title: 分散式系統理論
-nav_order: 12
+parent: 系統設計
+nav_order: 1
 ---
 
 # 分散式系統理論：CAP、一致性模型與分散式交易

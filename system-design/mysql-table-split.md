@@ -1,7 +1,8 @@
 ---
 layout: default
 title: MySQL 線上不停機拆表實戰
-nav_order: 15
+parent: 系統設計
+nav_order: 4
 ---
 
 # MySQL 線上不停機拆表實戰：從單表到核心表 + 次要表

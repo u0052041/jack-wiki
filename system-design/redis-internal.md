@@ -1,7 +1,8 @@
 ---
 layout: default
 title: Redis 底層原理
-nav_order: 14
+parent: 系統設計
+nav_order: 3
 ---
 
 # Redis 底層原理：架構、資料結構與實戰機制

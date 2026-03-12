@@ -1,7 +1,8 @@
 ---
 layout: default
 title: 閉包核心與實戰
-nav_order: 7
+parent: Golang 筆記
+nav_order: 6
 ---
 
 # Golang 閉包 (Closure) 核心與實戰

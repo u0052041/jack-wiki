@@ -1,7 +1,8 @@
 ---
 layout: default
 title: Context 並發控制完全指南
-nav_order: 10
+parent: Golang 筆記
+nav_order: 9
 ---
 
 # Go 進階筆記：Context 並發控制完全指南

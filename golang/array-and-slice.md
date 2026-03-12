@@ -1,7 +1,8 @@
 ---
 layout: default
 title: Slice & Array 終極實戰指南
-nav_order: 4
+parent: Golang 筆記
+nav_order: 3
 ---
 
 # Golang Slice & Array 終極實戰指南

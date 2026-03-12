@@ -1,62 +1,26 @@
 ---
 layout: default
 title: 首頁
-nav_order: 1
-description: "Golang 學習筆記 - 高品質實戰教學 (繁體中文)"
+nav_order: 0
 permalink: /
 ---
 
-# Golang 學習筆記
+# Jack Ho — Backend Engineer
 {: .fs-9 }
 
-高品質 Golang 實戰教學筆記，適合有 Python 背景的開發者快速上手。
+Golang & Python 後端工程師，專注於高流量系統架構設計與效能優化。
 {: .fs-6 .fw-300 }
 
----
-
-## 📚 筆記目錄
-
-### 基礎篇
-
-| 主題 | 說明 |
-|:-----|:-----|
-| [Struct & Pointer 基礎指南](struct-and-pointer.html) | 結構體、指標、值傳遞 vs 引用 |
-| [String & Rune 字串處理](string-and-rune.html) | byte vs rune、中文處理陷阱 |
-| [Slice & Array 終極實戰指南](array-and-slice.html) | Python 對照、複製流派、常見陷阱 |
-| [Map 深度攻略](map.html) | Set 實作、併發安全、GC 優化 |
-
-### 進階篇
-
-| 主題 | 說明 |
-|:-----|:-----|
-| [Methods & Interfaces](interface-and-method.html) | Value vs Pointer Receiver、Nil 陷阱 |
-| [閉包核心與實戰](closure.html) | 狀態隔離、迴圈陷阱、Middleware 模式 |
-| [Defer & Switch 語法全集](defer-and-switch.html) | 資源管理、型別切換、常見陷阱 |
-| [Error 錯誤處理完全指南](error.html) | Panic vs Error、錯誤鏈、業界最佳實踐 |
-| [Context 並發控制完全指南](context.html) | 取消信號、超時控制、跨層傳值 |
-| [Goroutine & Channel 並發全攻略](goroutine-and-channel.html) | GMP 排程、Channel 模式、sync 工具箱 |
-
-### 系統設計篇
-
-| 主題 | 說明 |
-|:-----|:-----|
-| [分散式系統理論](distributed-system.html) | CAP、PACELC、分散式交易 (2PC/TCC/Saga) |
-| [資料庫底層原理](database-internal.html) | ACID、B+ Tree 索引、鎖機制、布隆過濾器 |
-| [Redis 底層原理](redis-internal.html) | 資料結構、持久化、Cluster、Pipeline、限流 |
-| [MySQL 線上不停機拆表](mysql-table-split.html) | Expand & Contract 六階段、雙寫、gh-ost |
+[Resume](resume.html){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
+[Golang 筆記](golang/){: .btn .fs-5 .mb-4 .mb-md-0 .mr-2 }
+[系統設計](system-design/){: .btn .fs-5 .mb-4 .mb-md-0 }
 
 ---
 
-## 🎯 適合對象
+## 關於這個站
 
-- 有 Python/JavaScript 背景，想轉職 Go 的開發者
-- 想快速掌握 Go 核心語法的工程師
-- 準備 Go 面試的求職者
+這裡記錄了我的技術學習筆記與個人履歷，涵蓋：
 
----
-
-## 💡 特色
-
-- **Python 對照**：用熟悉的語言對比，快速理解差異
-- **實戰導向**：每個語法都有真實使用場景
-- **避坑指南**：標註常見錯誤與陷阱
+- **Golang 筆記** — 從基礎語法到並發模型，適合有 Python 背景的開發者
+- **系統設計** — 分散式系統、資料庫底層原理、Redis 與線上拆表實務
+- **Resume** — 我的工作經歷與技能
