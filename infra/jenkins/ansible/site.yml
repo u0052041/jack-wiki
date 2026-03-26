@@ -1,0 +1,14 @@
+# site.yml — Ansible 的 entry point，整個 playbook 從這裡開始
+# 執行方式：ansible-playbook site.yml
+#
+# 這裡定義「對哪些 host 執行哪些 role」
+# role 的實際步驟寫在各自的 roles/<name>/tasks/main.yml
+
+- name: Configure Jenkins Controller
+  hosts: jenkins        # 對應 inventory.ini 裡的 [jenkins] group
+  become: true          # 用 sudo 執行（等同於 -b flag）
+
+  roles:
+    - docker            # 1. 安裝 Docker
+    - jenkins           # 2. 掛 EBS、啟動 Jenkins container
+    - cloudflared       # 3. 安裝 cloudflared、設定 tunnel

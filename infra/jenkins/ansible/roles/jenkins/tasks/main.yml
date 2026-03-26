@@ -1,0 +1,56 @@
+- name: Detect EBS device name
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - /dev/xvdf
+    - /dev/nvme1n1
+  register: ebs_devices
+
+- name: Set EBS device fact
+  ansible.builtin.set_fact:
+    ebs_device: "{{ item.item }}"
+  loop: "{{ ebs_devices.results }}"
+  when: item.stat.exists
+
+- name: Check if EBS is already formatted
+  ansible.builtin.command: blkid {{ ebs_device }}
+  register: blkid_result
+  changed_when: false
+  failed_when: false
+
+- name: Format EBS volume (first time only)
+  ansible.builtin.command: mkfs -t ext4 {{ ebs_device }}
+  when: blkid_result.rc != 0
+
+- name: Create Jenkins data directory
+  ansible.builtin.file:
+    path: "{{ jenkins_data_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Mount EBS volume
+  ansible.posix.mount:
+    path: "{{ jenkins_data_dir }}"
+    src: "{{ ebs_device }}"
+    fstype: ext4
+    opts: defaults,nofail
+    state: mounted
+
+- name: Set Jenkins data directory ownership
+  ansible.builtin.file:
+    path: "{{ jenkins_data_dir }}"
+    owner: "1000"
+    group: "1000"
+    recurse: true
+
+- name: Start Jenkins container
+  community.docker.docker_container:
+    name: jenkins
+    image: "{{ jenkins_image }}"
+    state: started
+    restart_policy: always
+    ports:
+      - "{{ jenkins_http_port }}:8080"
+      - "{{ jenkins_agent_port }}:50000"
+    volumes:
+      - "{{ jenkins_data_dir }}:/var/jenkins_home"

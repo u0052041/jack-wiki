@@ -1,0 +1,34 @@
+- name: Download cloudflared rpm
+  ansible.builtin.get_url:
+    url: https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-x86_64.rpm
+    dest: /tmp/cloudflared.rpm
+    mode: "0644"
+
+- name: Install cloudflared
+  ansible.builtin.dnf:
+    name: /tmp/cloudflared.rpm
+    state: present
+    disable_gpg_check: true
+
+- name: Get Cloudflare Tunnel token from SSM
+  ansible.builtin.command: >
+    aws ssm get-parameter
+    --name "{{ cloudflare_ssm_param }}"
+    --with-decryption
+    --query "Parameter.Value"
+    --output text
+    --region {{ aws_region }}
+  register: tunnel_token
+  changed_when: false
+  no_log: true
+
+- name: Install cloudflared as systemd service
+  ansible.builtin.command: cloudflared service install {{ tunnel_token.stdout }}
+  args:
+    creates: /etc/systemd/system/cloudflared.service
+
+- name: Start and enable cloudflared service
+  ansible.builtin.systemd:
+    name: cloudflared
+    state: started
+    enabled: true
