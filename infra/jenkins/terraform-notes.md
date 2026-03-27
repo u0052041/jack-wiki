@@ -1,3 +1,10 @@
+---
+layout: default
+title: Terraform + Jenkins 學習筆記
+parent: Infra / DevOps
+nav_order: 4
+---
+
 # Terraform + Jenkins 學習筆記
 
 ## 專案結構
