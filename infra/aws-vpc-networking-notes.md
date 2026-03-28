@@ -44,11 +44,18 @@ Region
 
 CIDR 決定這個網段有幾個 IP，`/` 後面的數字越大，IP 數越少：
 
-| CIDR | IP 數量 | 常見用途 |
-|------|---------|---------|
-| `/16` | 65,536 | VPC 本身 |
-| `/24` | 256 | 一般 subnet |
-| `/28` | 16 | 小型 subnet（如 ALB only）|
+| CIDR | 固定位數 | 可變部分 | IP 數量 | 常見用途 |
+|------|---------|---------|---------|---------|
+| `/16` | 前兩段固定 | 後兩段可變（`x.x`）| 256 × 256 = 65,536 | VPC 本身 |
+| `/24` | 前三段固定 | 最末段可變（`x`）| 256 | 一般 subnet |
+| `/28` | 前三段半固定 | 最末 4 bits | 16 | 小型 subnet（如 ALB only）|
+| `/32` | 全部固定 | 無 | 1 | 單一 IP（SG 白名單用）|
+
+```
+10.0.0.0/16  → 10.0.x.x        → 65,536 個 IP
+10.0.1.0/24  → 10.0.1.x        → 256 個 IP
+10.0.1.5/32  → 10.0.1.5 only   → 1 個 IP
+```
 
 AWS 每個 subnet 會保留 5 個 IP（前 4 + 最後 1），`/24` 實際可用 251 個。
 
@@ -90,9 +97,23 @@ AZ-B:
 | | IGW | NAT Gateway | VPC Endpoint |
 |---|---|---|---|
 | 位置 | VPC 層級 | Public subnet | VPC 內部 |
-| 方向 | 雙向 | 單向（只出不進）| 雙向 |
+| 方向 | **雙向**（進出都走它）| **單向**（只出不進）| 雙向 |
 | 費用 | 免費 | 按時 + 流量計費 | Gateway 免費，Interface 按時計費 |
 | 用途 | Public subnet 對外 | Private subnet 對外 | 存取 AWS 服務 |
+
+> **IGW vs NAT GW 方向差異**：IGW 雙向，外部可主動連進來（配合 SG 控管）。NAT GW 單向，private subnet 可以出去，但外部無法主動連進來，這是 private subnet 的安全保障。
+
+### Route Table 只管 Outbound
+
+Route Table 只決定「封包要出去時走哪條路」，進來的流量不查 Route Table。
+
+```
+進來：Internet → IGW → 直接找目的地 IP → SG 決定能不能進
+出去：資源 → 查 Route Table → 走對應的出口（IGW / NAT GW）
+```
+
+進來的封包已經知道目的地 IP，IGW 直接送進來，不需要路由決策。
+查路由是為了解決「不知道要走哪條路出去」的問題。
 
 ### Route Table 必要設定
 
@@ -205,7 +226,26 @@ VPC-C ─┘
 | 評估順序 | 數字小的先，match 就停 | 所有規則一起評估 |
 | 預設行為 | 預設 NACL 全放行 | 預設 SG 拒絕所有 inbound |
 
-### Stateless 的影響
+### SG 是 Stateful
+
+SG 允許進來的流量，回去的回應自動允許，不需要另外設 outbound 規則：
+
+```
+Inbound: Allow TCP 443 from 0.0.0.0/0
+→ 進來的 443 流量允許，回應自動放行，不需要設 outbound
+```
+
+### SG 只有 Allow，沒有 Deny
+
+SG 只能寫允許規則，沒有匹配的預設全部拒絕。
+想擋特定 IP 只能靠 NACL（有 Deny 規則）。
+
+### SG 是綁在 ENI 上，不是 EC2
+
+EC2 可以有多個網卡（ENI），每個 ENI 可以有不同 SG。
+EKS node 的 Pod 網路也是透過 ENI 運作，理解這點在排查 EKS 網路問題時很重要。
+
+### NACL Stateless 的影響
 
 NACL 是 stateless，所以 inbound 和 outbound **都要設**：
 
@@ -369,7 +409,7 @@ Internet → ALB SG (443) → App SG (8080 from ALB SG) → DB SG (5432 from App
 
 | 問題 | 答案 |
 |------|------|
-| Public subnet 和 Private subnet 差在哪？ | Route Table 有沒有 `0.0.0.0/0 → IGW` |
+| Public subnet 和 Private subnet 差在哪？ | **Terraform 沒有 public/private 這個欄位，這是抽象概念**：Route Table 有 `0.0.0.0/0 → IGW` 就是 public，有 `0.0.0.0/0 → NAT GW` 就是 private，沒有對外路由就是 isolated |
 | NAT Gateway 要放在哪個 subnet？ | Public subnet，Private subnet 的 route 指向它 |
 | NACL 和 SG 哪個先評估？ | NACL 先（subnet 層），SG 後（instance 層）|
 | ALB 後面的 EC2 需要 Public IP 嗎？ | 不需要，放 private subnet 就好，ALB 負責對外 |

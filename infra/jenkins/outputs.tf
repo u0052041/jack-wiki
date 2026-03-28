@@ -1,34 +1,25 @@
-output "elastic_ip" {
-    description = "Public IP of Jenkins controller (for Ansible inventory)"
-    value       = aws_eip.jenkins.public_ip
-}
-
-output "ssh_command" {
-    description = "SSH command to connect to Jenkins controller"
-    value       = "ssh -i ~/.ssh/jenkins-key ec2-user@${aws_eip.jenkins.public_ip}"
-}
-
 output "instance_id" {
     description = "EC2 instance ID"
     value       = aws_instance.jenkins.id
 }
 
-output "ecs_cluster_arn" {
-    description = "ECS cluster ARN (Jenkins ECS plugin: Cloud > Cluster ARN)"
-    value       = aws_ecs_cluster.jenkins_agents.arn
+output "ssm_command" {
+    description = "SSM 連入指令"
+    value       = "aws ssm start-session --target ${aws_instance.jenkins.id} --region ${var.aws_region}"
 }
 
-output "ecs_task_execution_role_arn" {
-    description = "ECS task execution role ARN (Jenkins ECS plugin: Task Execution Role ARN)"
-    value       = aws_iam_role.ecs_task_execution.arn
+output "alb_dns_name" {
+    description = "ALB DNS name → 在 Cloudflare 設 CNAME 指向這個"
+    value       = var.enable_alb ? aws_lb.jenkins[0].dns_name : null
 }
 
-output "agent_security_group_id" {
-    description = "Agent security group ID (Jenkins ECS plugin: Security Group)"
-    value       = aws_security_group.jenkins_agent.id
-}
-
-output "agent_subnet_id" {
-    description = "Subnet ID for ECS agents (Jenkins ECS plugin: Subnets)"
-    value       = aws_subnet.public.id
+output "acm_validation_cname" {
+    description = "在 Cloudflare 加這筆 CNAME 來驗證 ACM 憑證（只需要做一次）"
+    value = {
+        for dvo in aws_acm_certificate.jenkins.domain_validation_options : dvo.domain_name => {
+            name  = dvo.resource_record_name
+            type  = dvo.resource_record_type
+            value = dvo.resource_record_value
+        }
+    }
 }
