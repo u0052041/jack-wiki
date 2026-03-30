@@ -40,12 +40,12 @@ jenkins/     → 管 Jenkins infra（EC2、ALB、ACM、SG、IAM）
              → user_data 負責 EC2 上的軟體安裝（Docker、Jenkins）
 ```
 
-EC2 軟體安裝用 `user_data`，只在開機時跑一次。升級 Jenkins image 手動進去操作：
+EC2 軟體安裝用 `user_data`，只在開機時跑一次。升級 Jenkins image 改 Dockerfile 的 `FROM` 版本後跑 Terraform：
+
 ```bash
-aws ssm start-session --target $(terraform output -raw instance_id)
-docker pull jenkins/jenkins:new-version
-docker stop jenkins && docker rm jenkins
-# 重新 docker run（參考 main.tf user_data）
+# 改 Dockerfile 的 FROM jenkins/jenkins:x.x.x-lts
+# Terraform 偵測 filemd5() 變化 → 自動 buildx + push ECR → SSM restart container
+terraform apply
 ```
 
 ## .gitignore

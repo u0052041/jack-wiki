@@ -8,7 +8,7 @@ nav_order: 8
 # EKS 筆記
 {: .no_toc }
 
-EKS 叢集架構、IAM Roles、Node Group、Jenkins 整合、IRSA、ALB Controller、Helm
+EKS 核心概念：IAM Roles、Node Group、IRSA、OIDC、ServiceAccount、ALB Controller、Helm
 {: .fs-6 .fw-300 }
 
 ## 目錄
@@ -19,71 +19,7 @@ EKS 叢集架構、IAM Roles、Node Group、Jenkins 整合、IRSA、ALB Controll
 
 ---
 
-## 一、專案結構
-
-```
-infra/
-├── networking/          ← 共用網路層（VPC、subnet、NAT GW）
-│   └── outputs.tf       ← 輸出 vpc_id、private_subnet_ids 給其他模組用
-├── jenkins/             ← Jenkins CI server
-└── k8s/                 ← EKS 叢集
-    ├── provider.tf      ← AWS provider + required_providers
-    ├── variables.tf     ← cluster_name、node 規格等變數
-    ├── locals.tf        ← common_tags
-    ├── data.tf          ← remote state + Jenkins SG data source
-    ├── eks.tf           ← EKS Cluster + OIDC Provider + Jenkins Access Entry
-    ├── iam.tf           ← Cluster Role + Node Role + Policy Attachments
-    ├── node-group.tf    ← Managed Node Group
-    ├── sg.tf            ← Jenkins → EKS API 443 ingress rule
-    ├── alb-controller.tf← ALB Controller IRSA + SSM Parameters
-    ├── outputs.tf       ← cluster endpoint、CA cert、ALB Role ARN
-    ├── policies/        ← ALB Controller IAM Policy JSON
-    └── Jenkinsfile      ← CI pipeline：讀 SSM → helm install ALB Controller
-```
-
-網路層用 `terraform_remote_state` 共享，k8s 模組從 `../networking/terraform.tfstate` 讀 VPC 和 subnet。
-
----
-
-## 二、EKS Cluster 設定
-
-### Private Endpoint Only
-
-```hcl
-vpc_config {
-    subnet_ids              = data.terraform_remote_state.networking.outputs.private_subnet_ids
-    endpoint_private_access = true
-    endpoint_public_access  = false
-}
-```
-
-Cluster API endpoint 完全不對外開放，只有 VPC 內部能呼叫。這代表：
-
-```
-你的筆電 ──✕──→ EKS API（不通）
-Jenkins（同 VPC）──✓──→ EKS API（通）
-```
-
-好處是安全，壞處是本機 `kubectl` 不能直接用，必須透過 VPN 或 SSM 跳板。
-
-### Access Config
-
-```hcl
-access_config {
-    authentication_mode                         = "API_AND_CONFIG_MAP"
-    bootstrap_cluster_creator_admin_permissions = true
-}
-```
-
-`API_AND_CONFIG_MAP` 代表同時支援兩種 K8s 存取控制：
-- **API 模式**：用 `aws_eks_access_entry` 在 Terraform 裡直接管理（新做法）
-- **ConfigMap 模式**：傳統 `aws-auth` ConfigMap（向下相容）
-
-`bootstrap_cluster_creator_admin_permissions = true` 讓建叢集的 IAM 身份自動拿到 admin 權限，不然連建完的人自己都進不去。
-
----
-
-## 三、IAM Roles — Cluster 和 Node 各需一個
+## 一、IAM Roles — Cluster 和 Node 各需一個
 
 ### EKS Cluster Role
 
@@ -117,7 +53,7 @@ ALB Role     → ALB Controller Pod 用（透過 IRSA）
 
 ---
 
-## 四、Node Group
+## 二、Node Group
 
 ```hcl
 resource "aws_eks_node_group" "main" {
@@ -142,99 +78,21 @@ resource "aws_eks_node_group" "main" {
 
 Node 跑在 private subnet，沒有 public IP，對外流量走 NAT Gateway。
 
----
+### EKS Add-ons
 
-## 五、Jenkins 與 EKS 整合
+EKS 有幾個核心元件是以 **managed add-on** 形式運作，AWS 負責升級和維護：
 
-### 問題：Jenkins 怎麼操作 K8s？
+| Add-on | 用途 |
+|--------|------|
+| **CoreDNS** | 叢集內部 DNS 解析（Service name → ClusterIP）|
+| **kube-proxy** | 維護 Node 上的網路規則（iptables / IPVS）|
+| **VPC CNI** | 幫 Pod 分配 VPC 內的 IP（`amazon-vpc-cni-k8s`）|
 
-Jenkins 跑在同一個 VPC 的另一台 EC2 上，要能：
-1. 呼叫 EKS API（kubectl / helm）
-2. 擁有 K8s 叢集內的操作權限
-
-### 網路層：Security Group Rule
-
-```hcl
-resource "aws_security_group_rule" "eks_from_jenkins" {
-    type                     = "ingress"
-    from_port                = 443
-    to_port                  = 443
-    protocol                 = "tcp"
-    security_group_id        = eks_cluster_sg     # EKS 的 SG
-    source_security_group_id = jenkins_sg         # Jenkins 的 SG
-}
-```
-
-EKS API 跑在 443，這條規則讓 Jenkins SG 的流量能進到 EKS SG。
-
-### 權限層：EKS Access Entry
-
-```hcl
-resource "aws_eks_access_entry" "jenkins" {
-    cluster_name  = "main-eks"
-    principal_arn = "arn:aws:iam::xxx:role/jenkins-role"
-    type          = "STANDARD"
-}
-
-resource "aws_eks_access_policy_association" "jenkins" {
-    policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
-    access_scope { type = "cluster" }
-}
-```
-
-這是 EKS 新的權限管理方式（取代 `aws-auth` ConfigMap）：
-- `access_entry` — 聲明「jenkins-role 可以存取這個叢集」
-- `access_policy_association` — 給予 `ClusterAdmin` 權限，scope 是整個叢集
-
-```
-Jenkins EC2 → assume jenkins-role → 呼叫 EKS API
-                                     ↓
-                        EKS 查 Access Entry：
-                        "jenkins-role 有 ClusterAdmin，放行"
-```
-
-### 資料傳遞：SSM Parameters
-
-Terraform 建完 EKS 後，Jenkins Pipeline 需要知道一些值（Role ARN、VPC ID 等）。
-
-做法是 Terraform 把值寫進 SSM Parameter Store，Jenkinsfile 再讀出來：
-
-```
-Terraform 寫入：
-  /eks/main-eks/alb-controller-role-arn  → IAM Role ARN
-  /eks/main-eks/cluster-name             → main-eks
-  /eks/main-eks/aws-region               → ap-northeast-1
-  /eks/main-eks/vpc-id                   → vpc-xxx
-
-Jenkinsfile 讀取：
-  aws ssm get-parameter --name /eks/main-eks/alb-controller-role-arn
-```
-
-為什麼不直接 hardcode？因為 Role ARN 包含 AWS Account ID 和亂數，每次 `terraform apply` 都可能不同。用 SSM 當中間層，Pipeline 不需要改就能適應變化。
+建叢集時 EKS 會自動安裝這些 add-on。升級 K8s 版本後，add-on 也需要跟著升級，可以在 AWS Console 或用 Terraform `aws_eks_addon` 資源管理。
 
 ---
 
-## 六、Jenkinsfile — ALB Controller 部署 Pipeline
-
-```
-Stage 1: Read SSM Parameters
-  └─ 從 SSM 讀 ALB Role ARN 和 VPC ID
-
-Stage 2: Configure kubectl
-  └─ aws eks update-kubeconfig（讓 kubectl 能連到叢集）
-
-Stage 3: Install ALB Controller
-  └─ helm upgrade --install（冪等操作：沒有就裝，有就升級）
-
-Stage 4: Verify
-  └─ kubectl get deployment 確認 Controller 跑起來了
-```
-
-`helm upgrade --install` 是 Helm 的冪等用法 — 第一次跑等於 install，之後跑等於 upgrade。CI 可以重複跑不會壞。
-
----
-
-## 七、為什麼需要 ALB Controller
+## 三、為什麼需要 ALB Controller
 
 EKS 叢集跑在 private subnet，外部流量進不來。需要一個東西在 public subnet「接客」，那就是 ALB。
 
@@ -261,7 +119,7 @@ Pod IP 註冊到 Target Group，Pod 重建換 IP 時自動更新
 
 ---
 
-## 八、ServiceAccount — Pod 在 K8s 裡的身份
+## 四、ServiceAccount — Pod 在 K8s 裡的身份
 
 K8s 裡每個 Pod 都有一個身份，叫 ServiceAccount（SA）。
 
@@ -276,7 +134,7 @@ Pod 啟動時：
 
 ---
 
-## 九、OIDC Provider — 讓 AWS 信任 K8s 的橋樑
+## 五、OIDC Provider — 讓 AWS 信任 K8s 的橋樑
 
 OIDC Provider 是在 **AWS IAM** 裡面註冊的 Identity Provider（不是 Policy，不是 Role）。
 
@@ -322,7 +180,7 @@ resource "aws_iam_openid_connect_provider" "eks" {
 
 ---
 
-## 十、IRSA — 讓 K8s SA 能用 IAM Role
+## 六、IRSA — 讓 K8s SA 能用 IAM Role
 
 IRSA（IAM Roles for Service Accounts）不是一個 AWS 服務，而是一個**模式**，由以下元件組合：
 
@@ -385,7 +243,7 @@ resource "aws_iam_role_policy_attachment" "alb_controller" {
 
 ---
 
-## 十一、Helm — K8s 的套件管理 + 部署工具
+## 七、Helm — K8s 的套件管理 + 部署工具
 
 ### Helm 是什麼
 
@@ -468,25 +326,9 @@ resource "helm_release" "alb_controller" {
 
 那個 annotation 就是 IRSA 的接口 — Pod 啟動時 EKS 看到它，自動注入 AWS 臨時憑證。
 
-### Terraform 和 Helm 的分工
-
-```
-Terraform 管 AWS 側：
-  1. OIDC Provider     ← IAM 服務
-  2. IAM Role          ← IAM 服務
-  3. IAM Policy        ← IAM 服務
-
-Helm 管 K8s 側：
-  4. ServiceAccount    ← K8s 資源
-  5. Controller Pod    ← K8s 資源
-  6. RBAC 權限         ← K8s 資源
-```
-
-兩邊靠 SA annotation（`eks.amazonaws.com/role-arn`）串起來。
-
 ---
 
-## 十二、完整流程
+## 八、完整流程
 
 ```
 1. OIDC Provider    = AWS 跟 EKS 握手，建立信任
@@ -504,11 +346,13 @@ metadata:
   annotations:
     alb.ingress.kubernetes.io/scheme: internet-facing
 spec:
+  ingressClassName: alb
   rules:
     - host: app.example.com
       http:
         paths:
           - path: /
+            pathType: Prefix
             backend:
               service:
                 name: my-app
@@ -516,4 +360,94 @@ spec:
                   number: 80
 ```
 
+> `pathType` 和 `ingressClassName` 都是 `networking.k8s.io/v1` 的必填欄位，缺了 K8s 會拒絕這個 manifest。
+
 Controller 看到這個 Ingress，就會自動在 public subnet 建一個 ALB，把流量導到 private subnet 的 Pod。
+
+---
+
+## 九、Prod Best Practices
+
+### Control Plane Logging
+
+EKS 可以把 control plane 的 log 送到 CloudWatch，建議至少開 `api` 和 `audit`：
+
+```hcl
+resource "aws_eks_cluster" "main" {
+    # ...
+    enabled_cluster_log_types = ["api", "audit", "authenticator"]
+}
+```
+
+| Log 類型 | 內容 |
+|----------|------|
+| `api` | K8s API server 的請求 log |
+| `audit` | 誰在什麼時候做了什麼操作（安全稽核必備）|
+| `authenticator` | IAM 認證相關（debug IRSA / Access Entry 問題）|
+| `controllerManager` | 控制器運作 log |
+| `scheduler` | Pod 調度 log |
+
+> `audit` log 是 prod 必開的，出事時靠它查「誰刪了什麼」。
+
+### Pod Resource Requests / Limits
+
+每個 Pod 都應該設 resource requests 和 limits，不然一個 Pod 吃光整台 Node 的資源，其他 Pod 就 OOM 了：
+
+```yaml
+resources:
+  requests:         # 調度依據：K8s 保證至少給這麼多
+    cpu: "250m"     # 0.25 核
+    memory: "256Mi"
+  limits:           # 硬上限：超過就被 throttle（CPU）或 OOMKill（memory）
+    cpu: "500m"
+    memory: "512Mi"
+```
+
+| | requests | limits |
+|---|---|---|
+| 用途 | 調度依據，K8s 根據這個決定 Pod 放哪台 Node | 硬上限，超過就被限制 |
+| CPU 超過 | 不會，requests 只是預留 | 被 throttle（變慢但不會死）|
+| Memory 超過 | 不會 | 被 OOMKill（Pod 重啟）|
+
+> Prod 建議：**一定要設 requests**，limits 則視情況。不設 requests 的 Pod 是 `BestEffort` 等級，資源不夠時第一個被驅逐。
+
+### Network Policy
+
+預設 K8s 裡所有 Pod 可以互相通訊，沒有任何網路隔離。Network Policy 讓你控制 Pod 之間的流量：
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-all
+  namespace: production
+spec:
+  podSelector: {}     # 套用到 namespace 內所有 Pod
+  policyTypes:
+    - Ingress
+    - Egress
+  # 沒有 ingress/egress 規則 = 全部拒絕
+```
+
+然後再逐一開放需要的流量（白名單模式）：
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-frontend-to-api
+  namespace: production
+spec:
+  podSelector:
+    matchLabels:
+      app: api
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: frontend
+      ports:
+        - port: 8080
+```
+
+> 注意：EKS 預設的 VPC CNI **不支援 Network Policy**。需要額外安裝 Network Policy Agent（EKS add-on `vpc-cni` v1.14+ 支援），或使用 Calico。

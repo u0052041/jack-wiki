@@ -1,7 +1,6 @@
 .miramar_session.json
 *.tfstate
-*.tfstate.backup
+*.tfstate.*
 .terraform/
-terraform.tfstate
 jd.md
 職缺.md

@@ -228,7 +228,7 @@ ansible-playbook -i inventory.ini deploy_nginx.yaml --limit web1
 | Module | 用途 | 範例 |
 |:-------|:-----|:-----|
 | `command` | 執行指令（不走 shell，不支援管線） | `command: uptime` |
-| `shell` | 執行 shell 指令（支援管線、重導向） | `shell: cat /etc/os-release \| grep NAME` |
+| `shell` | 執行 shell 指令（支援管線、重導向） | `shell: cat /etc/os-release | grep NAME` |
 | `copy` | 複製本地檔案到遠端 | `copy: src=./app.conf dest=/etc/app.conf` |
 | `file` | 管理檔案 / 目錄 / 權限 | `file: path=/tmp/logs state=directory mode=0755` |
 | `apt` | 管理 Debian/Ubuntu 套件 | `apt: name=git state=present` |
@@ -274,6 +274,29 @@ roles/
 ```
 
 Ansible 會自動找 `roles/<name>/tasks/main.yml`，不需要手動 include。
+
+### ansible-galaxy — 從社群下載 Role
+
+不需要每個 Role 都自己寫，`ansible-galaxy` 可以從社群下載現成的：
+
+```bash
+# 從 Ansible Galaxy 下載 role
+ansible-galaxy install geerlingguy.docker
+
+# 用 requirements.yml 管理多個 role
+ansible-galaxy install -r requirements.yml
+```
+
+```yaml
+# requirements.yml
+roles:
+  - name: geerlingguy.docker
+    version: "7.4.1"
+  - name: geerlingguy.jenkins
+    version: "5.0.0"
+```
+
+下載的 role 預設放在 `~/.ansible/roles/`，在 Playbook 裡直接用名字引用即可。
 
 ### site.yml 怎麼使用 Role
 
