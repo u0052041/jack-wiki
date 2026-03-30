@@ -28,15 +28,10 @@ variable "jenkins_instance_type" {
     default     = "t3.small"
 }
 
-variable "jenkins_image" {
-    description = "Docker image for Jenkins controller"
-    type        = string
-    default     = "jenkins/jenkins:2.541.3-lts"
-}
-
 variable "jenkins_domain" {
     description = "Domain for Jenkins (e.g. jenkins.example.com)"
     type        = string
+    default     = "jenkins.u0052041.com"
 }
 
 variable "enable_alb" {

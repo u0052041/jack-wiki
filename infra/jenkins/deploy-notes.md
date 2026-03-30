@@ -25,8 +25,10 @@ infra/
     ├── acm.tf           ← ACM 憑證
     ├── alb.tf           ← ALB + Listener
     ├── sg.tf            ← ALB SG + Controller SG
-    ├── iam.tf           ← IAM Role + SSM
-    ├── main.tf          ← EC2 + EBS + user_data
+    ├── iam.tf           ← IAM Role + SSM + EKS + ECR
+    ├── ecr.tf           ← ECR repo + image build（buildx --platform linux/amd64）
+    ├── Dockerfile       ← Custom Jenkins image（aws cli + kubectl + helm）
+    ├── main.tf          ← EC2 + EBS + user_data + container update
     └── outputs.tf
 ```
 
@@ -154,19 +156,7 @@ resource "aws_security_group_rule" "controller_from_alb" {
 
 ---
 
-## Step 6：IAM（iam.tf）
-
-| Resource | 用途 |
-|----------|------|
-| `aws_iam_role` (jenkins) | EC2 掛的 role |
-| `AmazonSSMManagedInstanceCore` | SSM Session Manager（不需要 SSH）|
-| `aws_iam_instance_profile` | EC2 與 IAM Role 的橋樑 |
-
-EC2 不能直接掛 Role，需透過 `instance_profile`。
-
----
-
-## Step 7：EC2 + EBS（main.tf）
+## Step 6：EC2 + EBS（main.tf）
 
 ```
 aws_instance          → Jenkins Controller（user_data 自動裝 Docker + Jenkins）
@@ -180,11 +170,80 @@ user_data 啟動流程：
 1. 安裝 Docker
 2. 等待 EBS 裝置出現（最多等 150 秒）
 3. 格式化 EBS（首次）並掛載到 `/mnt/jenkins-data`
-4. 啟動 Jenkins container
+4. 登入 ECR，拉取 custom Jenkins image
+5. 啟動 Jenkins container（使用 ECR image）
 
 ---
 
-## Step 8：Outputs（outputs.tf）
+## Step 7：ECR + Custom Jenkins Image（ecr.tf + Dockerfile）
+
+### Dockerfile
+
+在 `jenkins/jenkins:2.541.3-lts` 基礎上加裝 CI/CD 工具：
+
+```
+FROM jenkins/jenkins:2.541.3-lts
+├── AWS CLI      ← Terraform、SSM、ECR 操作
+├── kubectl      ← 操作 EKS 叢集
+└── Helm         ← 部署 K8s 應用
+```
+
+### ECR 資源
+
+```
+aws_ecr_repository        → 存放 custom Jenkins image
+aws_ecr_lifecycle_policy  → 只保留最近 5 個 image
+null_resource             → Dockerfile 變動時自動 build + push
+```
+
+### Cross-Platform Build
+
+Jenkins EC2 是 `x86_64`，本機 Mac 是 `arm64`，build 時必須指定平台：
+
+```bash
+docker buildx build --platform linux/amd64 -t <ecr_url>:latest .
+```
+
+不加 `--platform` 會 push arm64 image，EC2 pull 時報錯：
+```
+no matching manifest for linux/amd64 in the manifest list entries
+```
+
+### Image 更新機制（null_resource）
+
+Dockerfile 改動 → Terraform 偵測 `filemd5()` 變化 → 觸發兩個 `null_resource`：
+
+```
+1. jenkins_image_build      → 本機 buildx + push 到 ECR
+2. jenkins_container_update → SSM 送指令到 EC2：pull + restart container
+```
+
+強制測試整個流程（不改 Dockerfile）：
+```bash
+terraform apply \
+    -replace=null_resource.jenkins_image_build \
+    -replace=null_resource.jenkins_container_update
+```
+
+`filemd5()` 的上次數值存在 `terraform.tfstate` 的 triggers 裡，每次 plan/apply 時跟當前值比較。
+
+---
+
+## Step 8：IAM（iam.tf）
+
+| Resource | 用途 |
+|----------|------|
+| `aws_iam_role` (jenkins) | EC2 掛的 role |
+| `AmazonSSMManagedInstanceCore` | SSM Session Manager（不需要 SSH）|
+| `jenkins-eks-policy` | SSM Parameter 讀取 + EKS DescribeCluster |
+| `AmazonEC2ContainerRegistryReadOnly` | 從 ECR 拉 Jenkins image |
+| `aws_iam_instance_profile` | EC2 與 IAM Role 的橋樑 |
+
+EC2 不能直接掛 Role，需透過 `instance_profile`。
+
+---
+
+## Step 9：Outputs（outputs.tf）
 
 ```bash
 terraform output                    # 查所有
@@ -200,16 +259,16 @@ terraform output -raw instance_id   # 查單一（-raw 不含引號）
 
 ---
 
-## Step 9：部署流程
+## Step 10：部署流程
 
 ```bash
 # 1. 建 networking
 cd infra/networking
 terraform init && terraform apply
 
-# 2. 建 Jenkins
+# 2. 建 Jenkins（首次 apply 會 build + push ECR image）
 cd infra/jenkins
-terraform init && terraform apply -var="jenkins_domain=jenkins.yourdomain.com"
+terraform init && terraform apply
 
 # 3. 驗證 ACM 憑證
 terraform output acm_validation_cname
@@ -241,14 +300,14 @@ Jenkins 初始設定：
 # 強制重建 EC2（user_data 會重跑，但 EBS 資料保留）
 terraform apply -replace=aws_instance.jenkins
 
-# 升級 Jenkins image
-aws ssm start-session --target $(terraform output -raw instance_id)
-docker pull jenkins/jenkins:new-version
-docker stop jenkins && docker rm jenkins
-docker run -d --name jenkins --restart always \
-  -p 8080:8080 -p 50000:50000 \
-  -v /mnt/jenkins-data:/var/jenkins_home \
-  jenkins/jenkins:new-version
+# 更新 Jenkins image（改 Dockerfile 後）
+terraform apply
+# → 自動 buildx --platform linux/amd64 → push ECR → SSM restart container
+
+# 強制重新 build + deploy（不改 Dockerfile）
+terraform apply \
+    -replace=null_resource.jenkins_image_build \
+    -replace=null_resource.jenkins_container_update
 ```
 
 ---

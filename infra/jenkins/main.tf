@@ -54,6 +54,10 @@ resource "aws_instance" "jenkins" {
         # Jenkins UID is 1000
         chown -R 1000:1000 /mnt/jenkins-data
 
+        # Login to ECR and pull latest Jenkins image
+        aws ecr get-login-password --region ${var.aws_region} | \
+            docker login --username AWS --password-stdin ${aws_ecr_repository.jenkins.repository_url}
+
         # Start Jenkins container
         docker run -d \
             --name jenkins \
@@ -61,10 +65,37 @@ resource "aws_instance" "jenkins" {
             -p 8080:8080 \
             -p 50000:50000 \
             -v /mnt/jenkins-data:/var/jenkins_home \
-            ${var.jenkins_image}
+            ${aws_ecr_repository.jenkins.repository_url}:latest
     EOF
 
     user_data_replace_on_change = false
+}
+
+resource "null_resource" "jenkins_container_update" {
+    triggers = {
+        dockerfile = filemd5("${path.module}/Dockerfile")
+    }
+
+    provisioner "local-exec" {
+        command = <<-EOT
+            echo "Waiting for SSM agent to register on ${aws_instance.jenkins.id}..."
+            aws ssm wait instance-information-available \
+                --region ${var.aws_region} \
+                --filters "Key=InstanceIds,Values=${aws_instance.jenkins.id}"
+            aws ssm send-command \
+                --region ${var.aws_region} \
+                --instance-ids ${aws_instance.jenkins.id} \
+                --document-name "AWS-RunShellScript" \
+                --parameters 'commands=[
+                    "aws ecr get-login-password --region ${var.aws_region} | docker login --username AWS --password-stdin ${aws_ecr_repository.jenkins.repository_url}",
+                    "docker pull ${aws_ecr_repository.jenkins.repository_url}:latest",
+                    "docker stop jenkins && docker rm jenkins",
+                    "docker run -d --name jenkins --restart always -p 8080:8080 -p 50000:50000 -v /mnt/jenkins-data:/var/jenkins_home ${aws_ecr_repository.jenkins.repository_url}:latest"
+                ]'
+        EOT
+    }
+
+    depends_on = [null_resource.jenkins_image_build]
 }
 
 resource "aws_ebs_volume" "jenkins" {
