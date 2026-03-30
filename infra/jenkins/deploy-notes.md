@@ -1,11 +1,11 @@
 ---
 layout: default
-title: Terraform + Jenkins 學習筆記
+title: Jenkins 部署筆記
 parent: Infra / DevOps
 nav_order: 4
 ---
 
-# Terraform + Jenkins 學習筆記
+# Jenkins 部署筆記
 
 ## 專案結構
 
@@ -62,14 +62,14 @@ terraform.tfstate.backup
 
 ## Step 1：Networking 層
 
-Jenkins 和未來其他服務（EKS、RDS）共用同一個 VPC。
+Jenkins 和其他服務（EKS、RDS）共用同一個 VPC。
 
 ```
 VPC 10.0.0.0/16
 ├── public-1a   10.0.1.0/24   ← ALB、NAT GW
 ├── public-1c   10.0.2.0/24   ← ALB
-├── private-1a  10.0.10.0/24  ← Jenkins EC2、EKS nodes（未來）
-└── private-1c  10.0.11.0/24  ← EKS nodes（未來）
+├── private-1a  10.0.10.0/24  ← Jenkins EC2、EKS nodes
+└── private-1c  10.0.11.0/24  ← EKS nodes
 ```
 
 ```bash
@@ -312,54 +312,11 @@ terraform apply \
 
 ---
 
-## Terraform 常用語法
+## Terraform 補充筆記
 
-### count
+這份 Jenkins 部署文保留「Jenkins 專案本身」的部署流程與操作。  
+更完整的 Terraform 知識（常用語法、state 操作、import/moved、CI 流程、業界實務）已獨立整理到：
 
-決定要建幾個 resource，`count = 0` 等同於不建：
+- [`infra/terraform-notes.md`](../terraform-notes)
 
-```hcl
-count = var.enable_nat_gateway ? 1 : 0
-```
-
-- `count` 建出來的 resource 是 list，引用時要加 index：`aws_eip.nat[0].id`
-- `count = 0` 時完全不建，比 `destroy` 範圍小，只刪這個 resource
-
-### depends_on
-
-明確指定建立順序，**只在 Terraform 無法自動偵測依賴時才需要寫**：
-
-```hcl
-resource "aws_nat_gateway" "main" {
-    depends_on = [aws_internet_gateway.main]  # 先建 IGW，再建 NAT GW
-}
-```
-
-Terraform 透過引用關係自動判斷順序（例如 `allocation_id = aws_eip.nat[0].id` 會自動等 EIP 建好）。
-但 NAT GW 和 IGW 之間沒有直接引用，Terraform 無法自動判斷，需要手動寫 `depends_on`。
-
-### locals vs variables
-
-| | `variables.tf` | `locals.tf` |
-|--|----------------|-------------|
-| 可從外部傳入 | ✅（`-var="key=value"`）| ❌ |
-| 可做運算/組合 | ❌ | ✅ |
-| 適合放 | 使用者可能想改的值 | 內部衍生的計算值 |
-
----
-
-## Terraform 常用指令
-
-| 指令 | 用途 |
-|------|------|
-| `terraform init` | 初始化，下載 provider |
-| `terraform plan` | 預覽變更 |
-| `terraform apply` | 套用變更 |
-| `terraform destroy` | 刪除所有資源 |
-| `terraform apply -replace=<resource>` | 強制重建特定 resource |
-| `terraform state list` | 列出管理中的資源 |
-| `terraform state rm <resource>` | 從 state 移除 resource（不刪除實際資源）|
-| `terraform fmt` | 格式化 .tf 檔案 |
-| `terraform validate` | 驗證語法 |
-| `terraform output` | 查看所有 output |
-| `terraform output -raw <key>` | 查單一 output（不含引號）|
+如果你是來複習 Terraform，建議先看 `infra/terraform-notes.md`，再回來搭配本篇的 Jenkins 實作段落一起看。
