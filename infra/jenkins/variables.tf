@@ -28,12 +28,6 @@ variable "jenkins_instance_type" {
     default     = "t3.small"
 }
 
-variable "jenkins_domain" {
-    description = "Domain for Jenkins (e.g. jenkins.example.com)"
-    type        = string
-    default     = "jenkins.u0052041.com"
-}
-
 variable "enable_alb" {
     description = "開關 ALB（約 $16/月）。開啟：-var='enable_alb=true'，關閉：-var='enable_alb=false'"
     type        = bool

@@ -21,3 +21,9 @@ variable "enable_nat_gateway" {
     type        = bool
     default     = true
 }
+
+variable "wildcard_domain" {
+    description = "Wildcard domain for ACM certificate (e.g. *.example.com)"
+    type        = string
+    default     = "*.u0052041.com"
+}

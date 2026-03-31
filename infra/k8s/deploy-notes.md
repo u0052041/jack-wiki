@@ -23,8 +23,9 @@ nav_order: 9
 
 ```
 infra/
-├── networking/          ← 共用網路層（VPC、subnet、NAT GW）
-│   └── outputs.tf       ← 輸出 vpc_id、private_subnet_ids 給其他模組用
+├── networking/          ← 共用網路層（VPC、subnet、NAT GW、ACM wildcard cert）
+│   ├── acm.tf           ← Wildcard ACM *.u0052041.com + SSM parameter
+│   └── outputs.tf       ← 輸出 vpc_id、private_subnet_ids、wildcard_cert_arn
 ├── jenkins/             ← Jenkins CI server
 └── k8s/                 ← EKS 叢集
     ├── provider.tf      ← AWS provider + required_providers
@@ -37,8 +38,11 @@ infra/
     ├── sg.tf            ← Jenkins → EKS API 443 ingress rule
     ├── alb-controller.tf← ALB Controller IRSA + SSM Parameters
     ├── outputs.tf       ← cluster endpoint、CA cert、ALB Role ARN
-    ├── policies/        ← ALB Controller IAM Policy JSON
-    └── Jenkinsfile      ← CI pipeline：讀 SSM → helm install ALB Controller
+    ├── ingress.yaml               ← Ingress 規則（envsubst 注入 cert ARN）
+    ├── test-app.yaml              ← 測試用 Deployment + Service + PDB
+    ├── policies/                  ← ALB Controller IAM Policy JSON
+    ├── Jenkinsfile.alb-controller ← 安裝/升級 ALB Controller
+    └── Jenkinsfile.ingress        ← 部署/更新 Ingress 規則
 ```
 
 網路層用 `terraform_remote_state` 共享，k8s 模組從 `../networking/terraform.tfstate` 讀 VPC 和 subnet。
@@ -161,7 +165,7 @@ Jenkinsfile 讀取：
 
 ---
 
-## 四、Jenkinsfile — ALB Controller 部署 Pipeline
+## 四、Jenkinsfile.alb-controller — ALB Controller 部署 Pipeline
 
 ```
 Stage 1: Read SSM Parameters
@@ -195,22 +199,47 @@ Stage 4: Verify
 
 ## 五、部署流程
 
+### 完整順序
+
 ```bash
-# 1. 建 networking（如果還沒建）
+# 1. 建 networking（含 wildcard ACM cert）
 cd infra/networking
 terraform init && terraform apply
+# 首次需到 Cloudflare 加 CNAME 驗證：terraform output acm_validation_cname
 
 # 2. 建 EKS 叢集
 cd infra/k8s
 terraform init && terraform apply
-# → 建 EKS Cluster、Node Group、OIDC、IAM Roles、SSM Parameters
 
-# 3. 在 Jenkins 跑 ALB Controller Pipeline
-# → 讀 SSM → configure kubectl → helm install ALB Controller
+# 3. 在 Jenkins 跑 Jenkinsfile.alb-controller Pipeline（初次建叢集才需要）
+# 讀 SSM → configure kubectl → helm install ALB Controller
 
-# 4. 部署應用程式
-# → 寫 Ingress YAML → ALB Controller 自動建 ALB
+# 4. 在 Jenkins 跑 Jenkinsfile.ingress Pipeline
+# 讀 SSM cert ARN → deploy test-app + ingress
+
+# 5. 設定 DNS
+# Pipeline 的 Verify stage 會印出 ALB DNS name
+# 到 Cloudflare 加 CNAME：app.u0052041.com → ALB DNS name
 ```
+
+### ACM cert ARN 注入方式
+
+ingress.yaml 裡的 `certificate-arn` 用 `${WILDCARD_CERT_ARN}` 佔位符，部署時透過 `envsubst` 注入實際值。
+
+cert ARN 存在 SSM Parameter `/shared/wildcard-cert-arn`，跟 ALB Controller 的 SSM pattern 一致（`/eks/main-eks/*`）。這樣做的原因：
+- cert ARN 包含 AWS Account ID，不適合 hardcode 在 YAML 裡
+- Jenkins Pipeline 可以直接從 SSM 讀取，不需要傳參數
+- 跟現有 ALB Controller 的 SSM 慣例統一
+
+### Ingress 設計決策
+
+**Ingress Group**：所有服務共用同一個 ALB（`group.name: main`），用 host-based routing 分流。這樣做是因為每個 ALB 約 $16/月，共用一個可以省成本，未來加服務只需要新增 ingress rule。
+
+**HTTPS**：ALB 同時監聽 HTTP:80 和 HTTPS:443，HTTP 自動 301 redirect 到 HTTPS。cert 使用 networking 層的 wildcard `*.u0052041.com`。
+
+**TLS Policy**：使用 `ELBSecurityPolicy-TLS13-1-2-2021-06`，只允許 TLS 1.2 和 1.3，符合 prod security baseline。
+
+**Target Type**：使用 `ip` 模式（而非 `instance`），ALB 直接連到 Pod IP，不經過 NodePort，延遲更低。
 
 ### Terraform 和 Helm 的分工
 

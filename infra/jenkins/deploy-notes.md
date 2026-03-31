@@ -11,19 +11,19 @@ nav_order: 4
 
 ```
 infra/
-├── networking/          ← 共用網路層（VPC、subnet、NAT GW）
+├── networking/          ← 共用網路層（VPC、subnet、NAT GW、ACM wildcard cert）
 │   ├── provider.tf
 │   ├── variables.tf
 │   ├── locals.tf
 │   ├── vpc.tf
+│   ├── acm.tf           ← Wildcard ACM *.u0052041.com + SSM parameter
 │   └── outputs.tf
 └── jenkins/
     ├── data.tf          ← 讀 networking remote state
     ├── provider.tf
     ├── variables.tf
     ├── locals.tf
-    ├── acm.tf           ← ACM 憑證
-    ├── alb.tf           ← ALB + Listener
+    ├── alb.tf           ← ALB + Listener（cert 來自 networking wildcard）
     ├── sg.tf            ← ALB SG + Controller SG
     ├── iam.tf           ← IAM Role + SSM + EKS + ECR
     ├── ecr.tf           ← ECR repo + image build（buildx --platform linux/amd64）
@@ -35,8 +35,8 @@ infra/
 ## IaC 分層原則
 
 ```
-networking/  → 管共用網路（VPC、subnet、NAT GW）
-jenkins/     → 管 Jenkins infra（EC2、ALB、ACM、SG、IAM）
+networking/  → 管共用網路（VPC、subnet、NAT GW）+ 共用 ACM wildcard cert
+jenkins/     → 管 Jenkins infra（EC2、ALB、SG、IAM）
              → user_data 負責 EC2 上的軟體安裝（Docker、Jenkins）
 ```
 
@@ -105,17 +105,20 @@ subnet_ids = data.terraform_remote_state.networking.outputs.public_subnet_ids
 
 ---
 
-## Step 3：ACM 憑證（acm.tf）
+## Step 3：ACM 憑證
 
-DNS 驗證，憑證免費。Apply 後需手動到 Cloudflare 加一筆 CNAME：
+ACM wildcard 憑證 `*.u0052041.com` 放在 `networking/acm.tf`，所有服務（Jenkins、K8s Ingress）共用同一張。
 
-```bash
-terraform output acm_validation_cname
-# 把輸出的 name/value 加到 Cloudflare DNS
-# Terraform 會等待驗證完成（aws_acm_certificate_validation）
+這樣做的原因：
+- 一張 wildcard cert 涵蓋所有 subdomain，不需要每個服務各簽一張
+- DNS 驗證只需要在 Cloudflare 加一次 CNAME
+- 憑證放在 networking 共用層，各模組透過 remote state 讀取 cert ARN
+
+```hcl
+certificate_arn = data.terraform_remote_state.networking.outputs.wildcard_cert_arn
 ```
 
-憑證驗證完成後才會建立 HTTPS listener。
+ACM DNS 驗證在 networking apply 時處理，參考 `terraform output acm_validation_cname`。
 
 ---
 
@@ -255,31 +258,31 @@ terraform output -raw instance_id   # 查單一（-raw 不含引號）
 | `instance_id` | SSM 連入、CLI 操作用 |
 | `ssm_command` | 直接複製貼上連入 EC2 |
 | `alb_dns_name` | 在 Cloudflare 加 CNAME 指向這個 |
-| `acm_validation_cname` | 在 Cloudflare 加這筆 CNAME 驗證憑證 |
+
+ACM 相關 output（`wildcard_cert_arn`、`acm_validation_cname`）在 networking module。
 
 ---
 
 ## Step 10：部署流程
 
 ```bash
-# 1. 建 networking
+# 1. 建 networking（含 wildcard ACM cert）
 cd infra/networking
 terraform init && terraform apply
 
-# 2. 建 Jenkins（首次 apply 會 build + push ECR image）
+# 2. 驗證 ACM 憑證（首次部署才需要）
+terraform output acm_validation_cname
+# → 到 Cloudflare 加 CNAME，Terraform 會等待驗證完成
+
+# 3. 建 Jenkins（首次 apply 會 build + push ECR image）
 cd infra/jenkins
 terraform init && terraform apply
 
-# 3. 驗證 ACM 憑證
-terraform output acm_validation_cname
-# → 到 Cloudflare 加 CNAME，等待 Terraform 完成驗證
-
 # 4. 設定 domain
 terraform output alb_dns_name
-# → 到 Cloudflare 加 CNAME：jenkins.yourdomain.com → ALB DNS
+# → 到 Cloudflare 加 CNAME：jenkins.u0052041.com → ALB DNS
 
 # 5. 等 EC2 user_data 跑完（約 2-3 分鐘）
-# 用 SSM 連入確認
 aws ssm start-session --target $(terraform output -raw instance_id)
 docker ps  # 確認 jenkins container 在跑
 

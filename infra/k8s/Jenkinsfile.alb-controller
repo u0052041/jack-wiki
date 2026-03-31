@@ -1,3 +1,5 @@
+// ALB Controller 安裝 / 升級
+// 用途：初次建叢集、升級 controller 版本時跑
 pipeline {
     agent any
 
