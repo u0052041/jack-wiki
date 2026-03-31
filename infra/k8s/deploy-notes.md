@@ -224,7 +224,7 @@ terraform init && terraform apply
 
 ### ACM cert ARN 注入方式
 
-ingress.yaml 裡的 `certificate-arn` 用 `${WILDCARD_CERT_ARN}` 佔位符，部署時透過 `envsubst` 注入實際值。
+ingress.yaml 裡的 `certificate-arn` 用 `${WILDCARD_CERT_ARN}` 佔位符，部署時透過 `sed` 注入實際值（Jenkins container 沒有 `envsubst`，用 `sed` 替代）。
 
 cert ARN 存在 SSM Parameter `/shared/wildcard-cert-arn`，跟 ALB Controller 的 SSM pattern 一致（`/eks/main-eks/*`）。這樣做的原因：
 - cert ARN 包含 AWS Account ID，不適合 hardcode 在 YAML 裡
