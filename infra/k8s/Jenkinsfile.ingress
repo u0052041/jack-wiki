@@ -40,7 +40,24 @@ pipeline {
         stage('Verify') {
             steps {
                 sh "kubectl get pods -l app=test-app"
-                sh "kubectl get ingress test-app"
+                sh """
+                    echo "等待 ALB 建立..."
+                    for i in \$(seq 1 30); do
+                        ALB_DNS=\$(kubectl get ingress test-app -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+                        if [ -n "\$ALB_DNS" ]; then
+                            echo ""
+                            echo "============================================"
+                            echo "ALB DNS name: \$ALB_DNS"
+                            echo "到 Cloudflare 加 CNAME: app → \$ALB_DNS"
+                            echo "============================================"
+                            exit 0
+                        fi
+                        echo "  (\$i/30) ADDRESS 還是空的，等 10 秒..."
+                        sleep 10
+                    done
+                    echo "超過 5 分鐘仍未取得 ALB DNS，請手動檢查：kubectl get ingress test-app"
+                    exit 1
+                """
             }
         }
     }
