@@ -8,13 +8,6 @@ permalink: /
 # Jack Ho — Backend Engineer
 {: .fs-9 }
 
-Golang & Python 後端工程師，專注於高流量系統架構設計與效能優化。
-{: .fs-6 .fw-300 }
-
-[Resume](resume.html){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
-[Golang 筆記](golang/){: .btn .fs-5 .mb-4 .mb-md-0 .mr-2 }
-[系統設計](system-design/){: .btn .fs-5 .mb-4 .mb-md-0 }
-
 ---
 
 ## Golang 筆記
