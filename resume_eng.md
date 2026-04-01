@@ -37,7 +37,7 @@ Worked on the new e-commerce website from development to post-launch improvement
 - Wrote complex SQL in Metabase for data analysis and provided key business metrics for other teams
 - Took part in CI/CD setup and improved Elastic Beanstalk deployment to shorten release time
 
-### King Tribe Game Technology — Backend Engineer (2016/10 - 2021/03)
+### Wang Zu Game Technology — Backend Engineer (2016/10 - 2021/03)
 
 Started as IT staff and moved into backend development through self-study. Built an internal management system from scratch. Wrote integration tests to protect core features, fixed N+1 query problems to improve performance, and used Python and Selenium to automate repeated manual work.
 
