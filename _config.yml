@@ -8,3 +8,6 @@ baseurl: /jack-wiki
 search_enabled: true
 footer_content: "Jack Ho - Backend Engineer"
 color_scheme: light
+
+exclude:
+  - CLAUDE.md
