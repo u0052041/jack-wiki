@@ -100,45 +100,6 @@ Redis 對外的 5 種基本型別，底層由多種資料結構實現：
 > **重點**：Redis 會根據資料量自動選擇最省記憶體的編碼。當資料量超過閾值時，自動升級成更通用的結構。
 {: .note }
 
-### SDS — Simple Dynamic String
-
-Redis 不用 C 原生字串，而是自訂 SDS：
-
-```c
-struct sdshdr {
-    int len;      // 已使用長度
-    int alloc;    // 分配的總長度
-    char flags;   // 類型標記
-    char buf[];   // 實際字串內容
-};
-```
-
-| 特性 | C 字串 | SDS |
-|:-----|:-----|:-----|
-| 取長度 | O(n) 遍歷 | O(1) 直接讀 len |
-| 緩衝區溢位 | 不檢查，直接寫 | 自動擴容 |
-| 二進制安全 | 遇 `\0` 結束 | 用 len 判斷，可存任意二進制 |
-| 記憶體分配 | 每次修改都分配 | 預分配 + 惰性釋放 |
-
-**預分配策略**：
-- `len < 1MB` → 分配 `2 × len`
-- `len >= 1MB` → 每次多分配 1MB
-
-### Skip List — 跳躍表
-
-Sorted Set 的核心資料結構，支援 O(log n) 的查找、插入、刪除：
-
-```
-Level 4:  HEAD ──────────────────────────────────→ 90 ──→ NIL
-Level 3:  HEAD ──────────→ 30 ──────────────────→ 90 ──→ NIL
-Level 2:  HEAD ──→ 10 ──→ 30 ──────────→ 70 ──→ 90 ──→ NIL
-Level 1:  HEAD ──→ 10 ──→ 30 ──→ 50 ──→ 70 ──→ 90 ──→ NIL
-```
-
-- 實作簡單，不需要旋轉平衡操作
-- 天然支援範圍查詢（沿鏈結串列遍歷即可）
-- 透過隨機層數 (P=0.25) 維持平衡，平均時間複雜度 O(log n)
-
 ### Listpack（取代 ziplist）
 
 Redis 7.0+ 用 listpack 取代 ziplist，解決了連鎖更新問題：
@@ -159,91 +120,7 @@ Redis 7.0+ 用 listpack 取代 ziplist，解決了連鎖更新問題：
 
 ---
 
-## 三、持久化機制
-
-### RDB — 快照 (Snapshot)
-
-```
-┌───────────┐    fork()    ┌───────────┐
-│  主程序    │ ──────────→  │  子程序    │
-│ 繼續處理   │              │ 寫 RDB 檔 │
-│ 客戶端請求  │              │           │
-└───────────┘              └─────┬─────┘
-      │                          │
-      │ Copy-on-Write (COW)      │
-      │ 修改的頁才複製             ▼
-      │                     dump.rdb
-```
-
-```
-# redis.conf
-save 900 1       # 900 秒內有 1 次修改 → 觸發 RDB
-save 300 10      # 300 秒內有 10 次修改 → 觸發 RDB
-save 60 10000    # 60 秒內有 10000 次修改 → 觸發 RDB
-```
-
-| 優點 | 缺點 |
-|:-----|:-----|
-| 檔案緊湊，適合備份 | 兩次快照間的資料可能丟失 |
-| 恢復速度快 | fork() 大資料集時可能卡頓 |
-| 子程序不影響主程序效能 | 不適合即時備份需求 |
-
-### AOF — 追加式檔案 (Append Only File)
-
-```
-                寫命令
-                  │
-     ┌────────────┼────────────┐
-     ▼            ▼            ▼
-  AOF Buffer    執行命令     回應客戶端
-     │
-     ▼ (依策略寫入)
-  AOF 檔案
-```
-
-**三種 fsync 策略**：
-
-| 策略 | 說明 | 效能 | 安全性 |
-|:-----|:-----|:-----|:-----|
-| `always` | 每個寫命令都 fsync | 最慢 | 最高（最多丟 1 個命令） |
-| `everysec` | 每秒 fsync 一次（**預設**） | 居中 | 最多丟 1 秒資料 |
-| `no` | 交給 OS 決定何時 fsync | 最快 | 可能丟較多資料 |
-
-### AOF Rewrite — 重寫壓縮
-
-```
-# 重寫前 (6 個命令)
-SET counter 1
-INCR counter
-INCR counter
-INCR counter
-DEL temp
-SET name Redis
-
-# 重寫後 (2 個命令，效果相同)
-SET counter 4
-SET name Redis
-```
-
-### 混合持久化（Redis 4.0+）
-
-```
-┌──────────────────────────────┐
-│         AOF 檔案              │
-│  ┌─────────────────────────┐ │
-│  │ RDB 格式（前半段快照）    │ │
-│  ├─────────────────────────┤ │
-│  │ AOF 格式（後半段增量命令）│ │
-│  └─────────────────────────┘ │
-└──────────────────────────────┘
-```
-
-- **優勢**：結合 RDB 快速恢復 + AOF 低資料遺失
-- **啟用**：`aof-use-rdb-preamble yes`（Redis 4.0+ 預設開啟）
-
----
-
-## 四、記憶體管理與淘汰策略
+## 三、記憶體管理與淘汰策略
 
 ### 記憶體淘汰策略
 
@@ -285,7 +162,7 @@ Redis 對過期 key 採用**惰性刪除 + 定期刪除**雙重策略：
 
 ---
 
-## 五、Pipeline & Lua Script
+## 四、Pipeline & Lua Script
 
 ### Pipeline — 批次命令
 
@@ -309,22 +186,6 @@ Redis 對過期 key 採用**惰性刪除 + 定期刪除**雙重策略：
   共 1 次 RTT
 ```
 
-**Go 實作**：
-
-```go
-// 一般方式：3 次 RTT
-rdb.Set(ctx, "a", 1, 0)
-rdb.Set(ctx, "b", 2, 0)
-rdb.Set(ctx, "c", 3, 0)
-
-// Pipeline：1 次 RTT
-pipe := rdb.Pipeline()
-pipe.Set(ctx, "a", 1, 0)
-pipe.Set(ctx, "b", 2, 0)
-pipe.Set(ctx, "c", 3, 0)
-cmds, err := pipe.Exec(ctx)  // 一次送出、一次回收
-```
-
 > **重點**：Pipeline 只是減少網路往返，**不保證原子性**。命令之間可能被其他 client 的命令插入。需要原子性用 MULTI/EXEC 或 Lua Script。
 {: .note }
 
@@ -344,30 +205,6 @@ end
 return 1  -- 允許通過
 ```
 
-**Go 實作**：
-
-```go
-var rateLimitScript = redis.NewScript(`
-    local current = redis.call("GET", KEYS[1])
-    if current and tonumber(current) >= tonumber(ARGV[1]) then
-        return 0
-    end
-    current = redis.call("INCR", KEYS[1])
-    if tonumber(current) == 1 then
-        redis.call("EXPIRE", KEYS[1], ARGV[2])
-    end
-    return 1
-`)
-
-func AllowRequest(ctx context.Context, rdb *redis.Client, key string, limit int, windowSec int) (bool, error) {
-    result, err := rateLimitScript.Run(ctx, rdb, []string{key}, limit, windowSec).Int()
-    if err != nil {
-        return false, err
-    }
-    return result == 1, nil
-}
-```
-
 | 比較 | Pipeline | MULTI/EXEC | Lua Script |
 |:-----|:-----|:-----|:-----|
 | 原子性 | 無 | 有（批次執行） | 有（單執行緒執行） |
@@ -380,7 +217,7 @@ func AllowRequest(ctx context.Context, rdb *redis.Client, key string, limit int,
 
 ---
 
-## 六、高可用架構
+## 五、高可用架構
 
 ### Sentinel 哨兵模式
 
@@ -495,7 +332,7 @@ Client                     Cluster
 
 ---
 
-## 七、常見應用場景
+## 六、常見應用場景
 
 ### 分散式鎖
 
@@ -549,42 +386,6 @@ Client A                          Client B
    │  （重新 WATCH → 重試整個流程）    │
 ```
 
-**Go 實作**：
-
-```go
-func DeductBalance(ctx context.Context, rdb *redis.Client, userKey string, amount int) error {
-    maxRetries := 5
-
-    for i := 0; i < maxRetries; i++ {
-        err := rdb.Watch(ctx, func(tx *redis.Tx) error {
-            balance, err := tx.Get(ctx, userKey).Int()
-            if err != nil {
-                return err
-            }
-            if balance < amount {
-                return fmt.Errorf("餘額不足：%d < %d", balance, amount)
-            }
-
-            _, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
-                pipe.Set(ctx, userKey, balance-amount, 0)
-                return nil
-            })
-            return err
-        }, userKey)
-
-        if err == nil {
-            return nil
-        }
-        if err == redis.TxFailedErr {
-            continue
-        }
-        return err
-    }
-
-    return fmt.Errorf("樂觀鎖重試 %d 次仍失敗", maxRetries)
-}
-```
-
 > **重點**：`WATCH` 監視的粒度是整個 key。只要 key 的值有任何變動（即使改回原值），EXEC 都會失敗。這和資料庫 version 欄位樂觀鎖的差別 — 資料庫比對「值是否相同」，Redis 比對「有沒有被寫過」。
 {: .note }
 
@@ -617,116 +418,9 @@ func DeductBalance(ctx context.Context, rdb *redis.Client, userKey string, amoun
 └────────────────────────────────────────────────┘
 ```
 
-### 限流演算法
-
-#### 固定窗口計數器
-
-```
-視窗: 每分鐘 100 次
-
-  00:00 ─── 00:59 │ 01:00 ─── 01:59
-  [count: 78]      │ [count: 0]
-                   │
-                   重置計數器
-
-問題：00:50 發了 100 次 + 01:10 發了 100 次
-     → 在 00:50~01:10 這 20 秒內有 200 次請求（超過限制）
-```
-
-#### 滑動窗口
-
-```
-用 Sorted Set 實作滑動窗口限流：
-
-  ZADD rate:{ip} {timestamp} {unique_id}
-  ZREMRANGEBYSCORE rate:{ip} 0 {now - window}
-  ZCARD rate:{ip} → 當前窗口內的請求數
-```
-
-```go
-func SlidingWindowRateLimit(ctx context.Context, rdb *redis.Client, key string, limit int, window time.Duration) (bool, error) {
-    now := time.Now().UnixMilli()
-    windowStart := now - window.Milliseconds()
-
-    pipe := rdb.Pipeline()
-    // 移除窗口外的舊記錄
-    pipe.ZRemRangeByScore(ctx, key, "0", fmt.Sprintf("%d", windowStart))
-    // 計算當前窗口內的請求數
-    countCmd := pipe.ZCard(ctx, key)
-    pipe.Exec(ctx)
-
-    if countCmd.Val() >= int64(limit) {
-        return false, nil // 超過限制
-    }
-
-    // 加入新請求
-    pipe = rdb.Pipeline()
-    pipe.ZAdd(ctx, key, redis.Z{Score: float64(now), Member: fmt.Sprintf("%d", now)})
-    pipe.Expire(ctx, key, window) // 設定過期防止記憶體洩漏
-    pipe.Exec(ctx)
-
-    return true, nil
-}
-```
-
-#### 令牌桶 (Token Bucket)
-
-```
-┌──────────────┐
-│  Token Bucket │
-│  容量: 10     │
-│  ┌─────────┐ │    取得 token → 放行
-│  │●●●●●●●  │ │ ──────────────→
-│  └─────────┘ │    沒有 token → 拒絕
-│              │
-│  每秒補充 5 個│
-└──────────────┘
-
-特點：
-  - 允許突發流量（桶裡有 token 就放行）
-  - 長期速率穩定（補充速率固定）
-  - 比固定窗口更平滑
-```
-
-```go
-// Lua Script 實作令牌桶（原子操作）
-var tokenBucketScript = redis.NewScript(`
-    local key = KEYS[1]
-    local capacity = tonumber(ARGV[1])    -- 桶容量
-    local rate = tonumber(ARGV[2])        -- 每秒補充數
-    local now = tonumber(ARGV[3])         -- 當前時間戳 (ms)
-    local requested = tonumber(ARGV[4])   -- 請求的 token 數
-
-    local data = redis.call("HMGET", key, "tokens", "last_time")
-    local tokens = tonumber(data[1]) or capacity
-    local last_time = tonumber(data[2]) or now
-
-    -- 計算該補充多少 token
-    local elapsed = (now - last_time) / 1000
-    tokens = math.min(capacity, tokens + elapsed * rate)
-
-    if tokens >= requested then
-        tokens = tokens - requested
-        redis.call("HMSET", key, "tokens", tokens, "last_time", now)
-        redis.call("EXPIRE", key, capacity / rate * 2)
-        return 1  -- 允許
-    end
-
-    redis.call("HMSET", key, "tokens", tokens, "last_time", now)
-    redis.call("EXPIRE", key, capacity / rate * 2)
-    return 0  -- 拒絕
-`)
-```
-
-| 演算法 | 突發流量 | 精確度 | 實作複雜度 | 記憶體 |
-|:-----|:-----|:-----|:-----|:-----|
-| 固定窗口 | 窗口邊界突發 | 低 | 簡單 | O(1) |
-| 滑動窗口 | 平滑 | 高 | 中等 | O(n) |
-| 令牌桶 | 允許短暫突發 | 高 | 中等 | O(1) |
-
 ---
 
-## 八、Redis 的 ACID 特性
+## 七、Redis 的 ACID 特性
 
 | ACID | Redis 的體現 |
 |:-----|:-----|
@@ -737,3 +431,68 @@ var tokenBucketScript = redis.NewScript(`
 
 > **重點**：Redis 的 MULTI/EXEC 不是真正的 ACID 交易 — 它不支援 ROLLBACK。如果中間某個命令執行失敗，之前的命令不會回滾。它保證的是**批次命令的原子執行**（不會被其他命令插隊），而非傳統資料庫的交易語義。
 {: .important }
+
+---
+
+## 八、Redis 各資料結構常見指令速查
+
+### 1) String
+
+| 需求 | 常見指令 | 說明 |
+|:-----|:-----|:-----|
+| 設值/取值 | `SET key value` / `GET key` | 最基本 KV 操作 |
+| 整數遞增/遞減 | `INCR key` / `DECR key` | 計數器高頻用法 |
+| 設定過期 | `SETEX key seconds value` / `EXPIRE key seconds` | 快取 TTL |
+| 批次操作 | `MSET k1 v1 k2 v2` / `MGET k1 k2` | 降低網路往返 |
+
+### 2) Hash
+
+| 需求 | 常見指令 | 說明 |
+|:-----|:-----|:-----|
+| 設定欄位 | `HSET user:1 name Jack age 30` | 適合物件欄位 |
+| 讀取欄位 | `HGET user:1 name` | 取單一欄位 |
+| 讀取整個物件 | `HGETALL user:1` | 小物件方便 |
+| 欄位遞增 | `HINCRBY user:1 score 10` | 排名/積分常用 |
+| 檢查欄位是否存在 | `HEXISTS user:1 age` | 驗證欄位 |
+
+### 3) List
+
+| 需求 | 常見指令 | 說明 |
+|:-----|:-----|:-----|
+| 左/右推入 | `LPUSH queue a` / `RPUSH queue b` | 佇列基礎 |
+| 左/右彈出 | `LPOP queue` / `RPOP queue` | 消費資料 |
+| 區間讀取 | `LRANGE queue 0 -1` | 讀全部或部分 |
+| 阻塞等待 | `BLPOP queue 0` | 簡易阻塞佇列 |
+| 長度 | `LLEN queue` | 監控佇列深度 |
+
+### 4) Set
+
+| 需求 | 常見指令 | 說明 |
+|:-----|:-----|:-----|
+| 新增/移除成員 | `SADD tags redis` / `SREM tags redis` | 成員唯一、無序 |
+| 判斷成員是否存在 | `SISMEMBER tags redis` | 你提到的高頻指令 |
+| 取得全部成員 | `SMEMBERS tags` | 小集合可直接取 |
+| 交集/聯集/差集 | `SINTER a b` / `SUNION a b` / `SDIFF a b` | 社群、標籤、權限 |
+| 集合大小 | `SCARD tags` | 會員數/標籤數統計 |
+
+### 5) Sorted Set (ZSet)
+
+| 需求 | 常見指令 | 說明 |
+|:-----|:-----|:-----|
+| 新增帶分數成員 | `ZADD rank 100 user:1` | 排行榜核心 |
+| 查排名 | `ZRANK rank user:1` / `ZREVRANK rank user:1` | 正序/倒序排名 |
+| 查分數 | `ZSCORE rank user:1` | 查詢分數 |
+| 區間查詢 | `ZRANGE rank 0 9 WITHSCORES` | Top N |
+| 依分數範圍查詢 | `ZRANGEBYSCORE rank 80 100` | 分數區間過濾 |
+
+### 6) Key 與過期控制（跨結構常用）
+
+| 需求 | 常見指令 | 說明 |
+|:-----|:-----|:-----|
+| 檢查 key 存在 | `EXISTS key` | 快速判斷 |
+| 設定/查看 TTL | `EXPIRE key 60` / `TTL key` | 生命週期管理 |
+| 刪除 key | `DEL key` / `UNLINK key` | `UNLINK` 非同步刪除 |
+| 模糊掃描 | `SCAN 0 MATCH user:* COUNT 100` | 避免 `KEYS *` 阻塞 |
+
+> **重點**：線上環境避免使用 `KEYS *`、`SMEMBERS`（超大集合）、`HGETALL`（超大 Hash）這類一次取全量資料的指令；優先用 `SCAN`、分頁或範圍查詢。
+{: .warning }
