@@ -256,3 +256,129 @@ Helm 管 K8s 側（透過 Jenkinsfile）：
 ```
 
 兩邊靠 SA annotation（`eks.amazonaws.com/role-arn`）串起來。
+
+---
+
+## 六、Jenkins Kubernetes Agent
+
+### 為什麼要把 Agent 放到 K8s Pod？
+
+現有 Jenkinsfile 用 `agent any`，代表所有 job 直接跑在 Jenkins Master container 裡。問題：
+
+- 資源互搶：多個 job 同時跑，Master CPU/RAM 是共用的
+- 無法隔離：job 之間可能互相影響
+- 擴展困難：Master 是單機，無法水平擴展
+
+改成 K8s agent 後，每個 job 動態建立獨立 Pod，跑完自動刪除。
+
+### 工作原理（WebSocket 模式）
+
+```
+Jenkins Master（EC2）
+  │ 1. 偵測到 agent { kubernetes {...} }
+  │ 2. 呼叫 EKS API :443 → 建立 agent Pod
+  ▼
+EKS：Pod 啟動（jnlp + aws-tools containers）
+  │ 3. jnlp container 透過 WebSocket 連回 Jenkins
+  ▼    https://jenkins.u0052041.com → Cloudflare → ALB → Master
+Jenkins 接受連線 → stages 在 Pod 內執行 → Pod 完成後刪除
+```
+
+WebSocket 模式讓 agent 透過 HTTPS 443 連回 Master，不需要額外開放 TCP 50000 port。這是 cloud-native 環境（EKS + ALB + CDN）的主流做法。
+
+傳統 JNLP 模式需要：
+```
+Agent Pod → Master :50000（直接 TCP）
+```
+在 ALB + Cloudflare 架構下走不通（ALB 沒有 50000 listener）。
+
+### Agent Pod 通常跑什麼
+
+本專案的 agent pod 只負責 **deploy 任務**，不涉及 Docker：
+
+| 任務 | 命令 |
+|------|------|
+| 取得 kubeconfig | `aws eks update-kubeconfig` |
+| 讀取設定值 | `aws ssm get-parameter` |
+| 更新 deployment | `kubectl set image` / `helm upgrade` |
+| 等待 rollout | `kubectl rollout status` |
+
+### IRSA for Agent Pod
+
+Agent pod 裡的 `aws-cli` 需要呼叫 AWS API（讀 SSM、describe EKS），透過 IRSA 取得權限，模式與 ALB Controller 完全相同：
+
+```
+Terraform 管 AWS 側：
+  1. IAM Role（assume policy 綁定 OIDC + ServiceAccount）
+  2. IAM Policy（SSM read + EKS describe）
+  3. SSM Parameter 存 Role ARN
+
+K8s 側（YAML）：
+  4. Namespace: jenkins-agents
+  5. ServiceAccount: jenkins-agent（annotation: role-arn）
+  6. ClusterRole + ClusterRoleBinding（kubectl 操作權限）
+```
+
+與 ALB Controller IRSA 的差異：
+- ALB Controller 需要操作 AWS 資源（建 ALB、改 SG）→ 權限範圍廣
+- Jenkins Agent 只需要讀 SSM + describe EKS → 最小權限
+
+### Jenkinsfile 改法
+
+把 `agent any` 換成 `agent { kubernetes { yaml "..." } }`，Pod template 包含兩個 container：
+- `jnlp`：負責 WebSocket 連回 Master（固定寫法，用官方 `jenkins/inbound-agent` image）
+- `aws-tools`：重用現有 Jenkins ECR image（已含 kubectl/helm/aws-cli），實際跑 deploy 命令
+
+### Jenkins UI 設定步驟
+
+**Step 1：安裝 Kubernetes Plugin**
+`Manage Jenkins → Plugins → Available` → 搜尋 `kubernetes` → 安裝
+
+**Step 2：啟用 WebSocket**
+`Manage Jenkins → Security → Agent protocols` → 勾選 **WebSocket**
+
+**Step 3：設定 Kubernetes Cloud**
+`Manage Jenkins → Clouds → New Cloud → Kubernetes`：
+
+| 欄位 | 值 | 說明 |
+|------|-----|------|
+| Kubernetes URL | （空白） | Plugin 自動用 Master 的 kubeconfig |
+| Jenkins URL | `https://jenkins.u0052041.com` | Agent Pod 連回 Master 的地址 |
+| Jenkins tunnel | （空白） | WebSocket 不需要 |
+| Namespace | `jenkins-agents` | Agent Pod 建在此 namespace |
+| Use WebSocket | 勾選 | 透過 HTTPS 連回，不用 50000 port |
+
+### agent any vs agent kubernetes
+
+| | `agent any` | `agent kubernetes` |
+|---|---|---|
+| 執行位置 | Jenkins Master container | EKS 動態 Pod |
+| 資源隔離 | 無 | 有（每 job 獨立） |
+| 執行完清理 | 無 | 自動刪 Pod |
+| 設定複雜度 | 零 | 需要 K8s Plugin + RBAC |
+| 適合 | 低頻、infra 操作 | 高頻、需要隔離的 job |
+
+建議：`Jenkinsfile.alb-controller` 這類低頻 infra pipeline 保留 `agent any` 即可；日後新增服務 deploy pipeline 再用 `agent kubernetes`。
+
+### 初次部署順序
+
+```bash
+# 1. 建 IRSA Role
+cd infra/k8s && terraform apply
+```
+
+```
+# 2. 在 Jenkins 跑 Jenkinsfile.jenkins-agent
+#    讀 SSM → apply namespace + RBAC → annotate SA → verify
+```
+
+```
+# 3. Jenkins UI 設定（見上方步驟）
+```
+
+### 相關檔案
+
+- `infra/k8s/jenkins-agent-namespace.yaml` — namespace 定義
+- `infra/k8s/jenkins-agent-rbac.yaml` — SA + ClusterRole + Binding
+- `infra/k8s/jenkins-agent-irsa.tf` — IRSA + SSM Parameter
+- `infra/k8s/Jenkinsfile.jenkins-agent` — K8s 資源初始化 Pipeline
